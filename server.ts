@@ -2233,6 +2233,73 @@ app.get('/api/export-dify-dsl', (_req: Request, res: Response) => {
   res.sendFile(filePath);
 });
 
+// Helper: Send message to customer via Zalo Official Account Open API
+async function sendZaloOAReply(userId: string, replyText: string): Promise<boolean> {
+  const token = process.env.ZALO_OA_ACCESS_TOKEN;
+  if (!token) {
+    console.warn('[Zalo OA] ZALO_OA_ACCESS_TOKEN is missing in environment variables');
+    return false;
+  }
+  try {
+    const res = await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'access_token': token,
+      },
+      body: JSON.stringify({
+        recipient: { user_id: userId },
+        message: { text: replyText },
+      }),
+    });
+    const data = await res.json();
+    console.log('[Zalo OA] Send response:', data);
+    return data?.error === 0;
+  } catch (err) {
+    console.error('[Zalo OA] Error sending message:', err);
+    return false;
+  }
+}
+
+// Zalo Webhook verification (GET)
+app.get('/api/zalo/webhook', (_req: Request, res: Response) => {
+  res.status(200).send('ZALO_WEBHOOK_OK');
+});
+
+// Zalo Webhook events (POST): Listen to incoming customer messages from Zalo OA
+app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
+  const { event_name, user_id_by_app, sender, message } = req.body || {};
+  const userId = user_id_by_app || sender?.id;
+  const userText = message?.text;
+
+  // Acknowledge Zalo immediately to prevent retries (timeout is 3s on Zalo)
+  res.status(200).json({ error: 0, message: 'Received' });
+
+  if (event_name === 'user_send_text' && userId && userText) {
+    console.log(`[Zalo OA] Incoming message from user ${userId}: ${userText}`);
+    try {
+      let botReply = '';
+      if (ai) {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: `Khách hàng Zalo nhắn: "${userText}". Hãy trả lời với tư cách nhân viên CSKH Đi Chung Express theo đúng phong cách bản xứ Việt Nam, thân thiện, ngắn gọn và hữu ích.`,
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            temperature: 0.2,
+          },
+        });
+        botReply = response.text || '';
+      }
+      if (!botReply) {
+        botReply = 'Bên em chuyên về dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Vui lòng cung cấp thông tin địa chỉ giao nhận để bên em tư vấn ạ.';
+      }
+      await sendZaloOAReply(userId, botReply);
+    } catch (err: any) {
+      console.error('[Zalo OA] Error processing chat reply:', err?.message);
+    }
+  }
+});
+
 // Expand Google Maps short links (maps.app.goo.gl or goo.gl/maps) to full place URLs
 async function expandGoogleMapsShortLinks(text: string): Promise<string> {
   const shortLinkRegex = /https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps)\/[a-zA-Z0-9_\-]+/g;
