@@ -6,4 +6,3 @@ coverage/
 *.log
 !.env.example
 .env
-.env.local
