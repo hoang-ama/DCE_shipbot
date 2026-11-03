@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix ShipBot AI - Trợ Lý Thu Thập Thông Tin Vận Chuyển Hàng Hóa",
+  "description": "AI Chatbot thông minh tự động thu thập, trích xuất và hoàn thiện đầy đủ thông tin gửi hàng: người gửi, người nhận, thông tin hàng hóa, tính cước và tạo vận đơn chuyên nghiệp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
