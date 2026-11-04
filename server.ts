@@ -2233,73 +2233,6 @@ app.get('/api/export-dify-dsl', (_req: Request, res: Response) => {
   res.sendFile(filePath);
 });
 
-// Helper: Send message to customer via Zalo Official Account Open API
-async function sendZaloOAReply(userId: string, replyText: string): Promise<boolean> {
-  const token = process.env.ZALO_OA_ACCESS_TOKEN;
-  if (!token) {
-    console.warn('[Zalo OA] ZALO_OA_ACCESS_TOKEN is missing in environment variables');
-    return false;
-  }
-  try {
-    const res = await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'access_token': token,
-      },
-      body: JSON.stringify({
-        recipient: { user_id: userId },
-        message: { text: replyText },
-      }),
-    });
-    const data = await res.json();
-    console.log('[Zalo OA] Send response:', data);
-    return data?.error === 0;
-  } catch (err) {
-    console.error('[Zalo OA] Error sending message:', err);
-    return false;
-  }
-}
-
-// Zalo Webhook verification (GET)
-app.get('/api/zalo/webhook', (_req: Request, res: Response) => {
-  res.status(200).send('ZALO_WEBHOOK_OK');
-});
-
-// Zalo Webhook events (POST): Listen to incoming customer messages from Zalo OA
-app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
-  const { event_name, user_id_by_app, sender, message } = req.body || {};
-  const userId = user_id_by_app || sender?.id;
-  const userText = message?.text;
-
-  // Acknowledge Zalo immediately to prevent retries (timeout is 3s on Zalo)
-  res.status(200).json({ error: 0, message: 'Received' });
-
-  if (event_name === 'user_send_text' && userId && userText) {
-    console.log(`[Zalo OA] Incoming message from user ${userId}: ${userText}`);
-    try {
-      let botReply = '';
-      if (ai) {
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: `Khách hàng Zalo nhắn: "${userText}". Hãy trả lời với tư cách nhân viên CSKH Đi Chung Express theo đúng phong cách bản xứ Việt Nam, thân thiện, ngắn gọn và hữu ích.`,
-          config: {
-            systemInstruction: SYSTEM_INSTRUCTION,
-            temperature: 0.2,
-          },
-        });
-        botReply = response.text || '';
-      }
-      if (!botReply) {
-        botReply = 'Bên em chuyên về dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Vui lòng cung cấp thông tin địa chỉ giao nhận để bên em tư vấn ạ.';
-      }
-      await sendZaloOAReply(userId, botReply);
-    } catch (err: any) {
-      console.error('[Zalo OA] Error processing chat reply:', err?.message);
-    }
-  }
-});
-
 // Expand Google Maps short links (maps.app.goo.gl or goo.gl/maps) to full place URLs
 async function expandGoogleMapsShortLinks(text: string): Promise<string> {
   const shortLinkRegex = /https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps)\/[a-zA-Z0-9_\-]+/g;
@@ -2327,9 +2260,16 @@ async function expandGoogleMapsShortLinks(text: string): Promise<string> {
   return expandedText;
 }
 
-// API Chat Route with Gemini 3.8 Flash & Reverse Geocode
-app.post('/api/chat', async (req: Request, res: Response) => {
-  const { message: rawMessage, history = [], currentInfo = {} } = req.body;
+// Unified Core NLP & AI Processing Pipeline for Logistics Chatbot (Shared by Web UI & Zalo OA)
+async function processChatPipeline(
+  rawMessage: string,
+  history: any[] = [],
+  currentInfo: any = {}
+): Promise<{
+  reply: string;
+  shippingInfo: any;
+  quickReplies: string[];
+}> {
 
   if (!rawMessage || typeof rawMessage !== 'string') {
     return res.status(400).json({ error: 'Message is required' });
@@ -2357,7 +2297,7 @@ app.post('/api/chat', async (req: Request, res: Response) => {
   const isCorrection = /(?:không\s*(?:phải|đúng|chuẩn|chính\s*xác|được)|sai\s*(?:rồi|địa\s*chỉ|thông\s*tin)?|nhầm|sửa|thay\s*đổi|chỉnh\s*lại|đổi\s*(?:lại|thành|sang)|sao\s*lại|tại\s*sao)\b/i.test(rawMessage);
 
   if (isFormPreviouslySent && isConfirm && !isCorrection) {
-    return res.json({
+    return {
       reply: ORDER_CONFIRMATION_CLOSING_PHRASE,
       shippingInfo: {
         ...(currentInfo || {}),
@@ -2365,7 +2305,7 @@ app.post('/api/chat', async (req: Request, res: Response) => {
         isConfirmed: true,
       },
       quickReplies: [],
-    });
+    };
   }
 
   // Pre-extract with fast NLP parser first
@@ -2406,14 +2346,14 @@ app.post('/api/chat', async (req: Request, res: Response) => {
       reply = generateNaturalVietnameseReply(cleanShippingInfo, evalResult.nextMissingKey);
     }
 
-    return res.json({
+    return {
       reply,
       shippingInfo: {
         ...cleanShippingInfo,
         ...evalResult,
       },
       quickReplies: [],
-    });
+    };
   }
 
   try {
@@ -2758,14 +2698,14 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
 
     finalReply = cleanResponseText(finalReply);
 
-    return res.json({
+    return {
       reply: finalReply,
       shippingInfo: {
         ...mergedInfo,
         ...evalResult,
       },
       quickReplies: [],
-    });
+    };
   } catch (error: any) {
     console.warn('Gemini request failed or timed out, using fast smart extractor:', error?.message);
 
@@ -2793,14 +2733,195 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       reply = ack + reply;
     }
 
-    return res.json({
+    return {
       reply,
       shippingInfo: {
         ...cleanFast,
         ...evalResult,
       },
       quickReplies: [],
+    };
+  }
+}
+
+// API Chat Route for Web UI
+app.post('/api/chat', async (req: Request, res: Response) => {
+  const { message: rawMessage, history = [], currentInfo = {} } = req.body;
+
+  if (!rawMessage || typeof rawMessage !== 'string') {
+    return res.status(400).json({ error: 'Message is required' });
+  }
+
+  const result = await processChatPipeline(rawMessage, history, currentInfo);
+  return res.json(result);
+});
+
+// --- ZALO OA INTEGRATION WITH SESSION MEMORY & AUTO-REFRESH ---
+let currentZaloAccessToken = process.env.ZALO_OA_ACCESS_TOKEN || '';
+let currentZaloRefreshToken = process.env.ZALO_REFRESH_TOKEN || '';
+
+async function refreshZaloAccessToken(): Promise<string | null> {
+  const appId = process.env.ZALO_APP_ID || '4541345519906352744';
+  const secretKey = process.env.ZALO_APP_SECRET || '';
+  const refreshToken = currentZaloRefreshToken;
+
+  if (!appId || !secretKey || !refreshToken) {
+    console.warn('[Zalo OA] Missing credentials to auto-refresh token (ZALO_APP_ID, ZALO_APP_SECRET, or ZALO_REFRESH_TOKEN)');
+    return null;
+  }
+
+  try {
+    const bodyParams = new URLSearchParams({
+      refresh_token: refreshToken,
+      app_id: appId,
+      grant_type: 'refresh_token',
     });
+
+    const res = await fetch('https://oauth.zalo.me/v4/oa/access_token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'secret_key': secretKey,
+      },
+      body: bodyParams.toString(),
+    });
+
+    const data = await res.json();
+    if (data?.access_token) {
+      currentZaloAccessToken = data.access_token;
+      if (data.refresh_token) {
+        currentZaloRefreshToken = data.refresh_token;
+      }
+      console.log('[Zalo OA] Successfully auto-refreshed access token!');
+      return currentZaloAccessToken;
+    } else {
+      console.error('[Zalo OA] Failed to refresh token:', data);
+      return null;
+    }
+  } catch (err: any) {
+    console.error('[Zalo OA] Refresh token network error:', err?.message);
+    return null;
+  }
+}
+
+async function sendZaloOAReply(userId: string, replyText: string): Promise<boolean> {
+  const token = currentZaloAccessToken || process.env.ZALO_OA_ACCESS_TOKEN || '';
+  if (!token) {
+    console.warn('[Zalo OA] ZALO_OA_ACCESS_TOKEN is missing');
+    return false;
+  }
+
+  async function callZaloApi(authToken: string) {
+    return await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'access_token': authToken,
+      },
+      body: JSON.stringify({
+        recipient: { user_id: userId },
+        message: { text: replyText },
+      }),
+    });
+  }
+
+  try {
+    let res = await callZaloApi(token);
+    let data = await res.json();
+    console.log('[Zalo OA] Send response:', data);
+
+    // If token expired (error code -216 or token expired message), attempt auto-refresh and retry once
+    if (data?.error === -216 || data?.error === -204 || data?.error === -205 || (typeof data?.message === 'string' && data.message.toLowerCase().includes('token'))) {
+      console.warn('[Zalo OA] Access token seems expired. Attempting auto-refresh...');
+      const newToken = await refreshZaloAccessToken();
+      if (newToken) {
+        res = await callZaloApi(newToken);
+        data = await res.json();
+        console.log('[Zalo OA] Retry response after refresh:', data);
+      }
+    }
+
+    return data?.error === 0;
+  } catch (err) {
+    console.error('[Zalo OA] Error sending message:', err);
+    return false;
+  }
+}
+
+// In-memory conversation state per Zalo User (Preserves full shippingInfo & history)
+interface ZaloUserSession {
+  history: Array<{ role: 'user' | 'model'; content: string }>;
+  currentInfo: any;
+  lastActive: number;
+}
+const zaloUserSessions = new Map<string, ZaloUserSession>();
+
+// Cleanup stale sessions older than 24 hours periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [uid, sess] of zaloUserSessions.entries()) {
+    if (now - sess.lastActive > 24 * 60 * 60 * 1000) {
+      zaloUserSessions.delete(uid);
+    }
+  }
+}, 60 * 60 * 1000);
+
+// Zalo Webhook verification (GET)
+app.get('/api/zalo/webhook', (_req: Request, res: Response) => {
+  res.status(200).send('ZALO_WEBHOOK_OK');
+});
+
+// Zalo Webhook events (POST): Listen to incoming customer messages from Zalo OA
+app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
+  const { event_name, user_id_by_app, sender, message } = req.body || {};
+  const userId = user_id_by_app || sender?.id;
+  const userText = message?.text;
+
+  // Acknowledge Zalo immediately to prevent retries (timeout is 3s on Zalo)
+  res.status(200).json({ error: 0, message: 'Received' });
+
+  if (event_name === 'user_send_text' && userId && userText) {
+    console.log(`[Zalo OA] Incoming message from user ${userId}: ${userText}`);
+    try {
+      const isResetOrder = /^(?:tạo\s*đơn\s*mới|đơn\s*mới|hủy\s*đơn|làm\s*lại|reset)\b/i.test(userText.trim());
+
+      let session = zaloUserSessions.get(userId);
+      // Reset if inactive for > 6 hours or user explicitly requested new order
+      if (!session || isResetOrder || (Date.now() - session.lastActive > 6 * 60 * 60 * 1000)) {
+        session = {
+          history: [],
+          currentInfo: {},
+          lastActive: Date.now(),
+        };
+        zaloUserSessions.set(userId, session);
+      }
+
+      if (isResetOrder) {
+        const resetReply = 'Dạ em đã tạo phiên đơn mới rồi ạ. Bên em chuyên dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Anh/chị cho em xin thông tin địa chỉ lấy và giao hàng nhé!';
+        session.history.push({ role: 'user', content: userText });
+        session.history.push({ role: 'model', content: resetReply });
+        await sendZaloOAReply(userId, resetReply);
+        return;
+      }
+
+      // Run EXACT same intelligence pipeline as Web UI with full history and currentInfo!
+      const result = await processChatPipeline(userText, session.history, session.currentInfo);
+
+      // Update session state
+      session.history.push({ role: 'user', content: userText });
+      session.history.push({ role: 'model', content: result.reply });
+      session.currentInfo = result.shippingInfo;
+      session.lastActive = Date.now();
+
+      // Trim history if too long to keep context compact
+      if (session.history.length > 16) {
+        session.history = session.history.slice(-10);
+      }
+
+      await sendZaloOAReply(userId, result.reply);
+    } catch (err: any) {
+      console.error('[Zalo OA] Error processing chat reply:', err?.message);
+    }
   }
 });
 
