@@ -2015,6 +2015,54 @@ function formatOrderConfirmationForm(info: any): string {
 // Câu chốt sau khi khách xác nhận form đơn hàng
 export const ORDER_CONFIRMATION_CLOSING_PHRASE = 'Anh/ chị đợi chút em báo giá cho mình ạ';
 
+// Tạo mã vận đơn ngẫu nhiên chuẩn VN-LOG-DDMM-XXXX
+export function generateTrackingCode(): string {
+  const date = new Date();
+  const d = String(date.getDate()).padStart(2, '0');
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `VN-LOG-${d}${m}-${rand}`;
+}
+
+// Xuất phiếu vận đơn chi tiết (chuẩn văn bản gửi Zalo/SMS)
+export function generateShipmentTextSummary(info: any, trackingCode?: string): string {
+  const code = trackingCode || info?.trackingCode || generateTrackingCode();
+  const senderAddr = info?.sender?.address?.trim() || '(Chưa có)';
+  const receiverAddr = info?.receiver?.address?.trim() || '(Chưa có)';
+  const cargoName = info?.cargo?.name?.trim() || '(Chưa có)';
+  const cargoWeight = info?.cargo?.weight?.trim() || (info?.cargo?.weightKg ? `${info.cargo.weightKg}kg` : '(Chưa có)');
+  const cargoDim = info?.cargo?.dimensions?.raw?.trim() ||
+    (info?.cargo?.dimensions?.length && info?.cargo?.dimensions?.width && info?.cargo?.dimensions?.height
+      ? `${info.cargo.dimensions.length}x${info.cargo.dimensions.width}x${info.cargo.dimensions.height} cm`
+      : '0x0x0 cm');
+  const specialNotes = info?.cargo?.specialNotes?.trim() ? `\n- Ghi chú chi tiết: ${info.cargo.specialNotes.trim()}` : '';
+  const deliveryTime = info?.deliveryTime?.trim() || '(Chưa có)';
+
+  return `📦 [THÔNG TIN ĐƠN VẬN CHUYỂN HÀNG HÓA - ${code}]
+-----------------------------
+👤 1. NGƯỜI GỬI:
+- Địa chỉ lấy hàng: ${senderAddr}${info?.sender?.name ? `\n- Tên người gửi: ${info.sender.name}` : ''}${info?.sender?.phone ? `\n- SĐT: ${info.sender.phone}` : ''}
+
+🎯 2. NGƯỜI NHẬN:
+- Địa chỉ nhận hàng: ${receiverAddr}${info?.receiver?.name ? `\n- Tên người nhận: ${info.receiver.name}` : ''}${info?.receiver?.phone ? `\n- SĐT: ${info.receiver.phone}` : ''}
+
+📦 3. THÔNG TIN HÀNG HÓA:
+- Tên loại hàng: ${cargoName}
+- Khối lượng: ${cargoWeight}
+- Kích thước (DxRxC): ${cargoDim}${specialNotes}
+
+⏰ 4. THỜI GIAN GIAO NHẬN:
+- ${deliveryTime}
+-----------------------------
+🚀 Tạo tự động qua ShipBot AI Assistant`;
+}
+
+export function formatOrderClosingWithBill(info: any): string {
+  const code = info?.trackingCode || generateTrackingCode();
+  const bill = generateShipmentTextSummary(info, code);
+  return `${ORDER_CONFIRMATION_CLOSING_PHRASE}.\n\n${bill}`;
+}
+
 // Kiểm tra xem tin nhắn của khách hàng có phải là câu xác nhận (ok, đúng rồi, chuẩn rồi, xác nhận, báo giá giúp anh...) hay không
 function isCustomerConfirmation(text: string | undefined | null): boolean {
   if (!text) return false;
@@ -2297,13 +2345,16 @@ async function processChatPipeline(
   const isCorrection = /(?:không\s*(?:phải|đúng|chuẩn|chính\s*xác|được)|sai\s*(?:rồi|địa\s*chỉ|thông\s*tin)?|nhầm|sửa|thay\s*đổi|chỉnh\s*lại|đổi\s*(?:lại|thành|sang)|sao\s*lại|tại\s*sao)\b/i.test(rawMessage);
 
   if (isFormPreviouslySent && isConfirm && !isCorrection) {
+    const code = currentInfo?.trackingCode || generateTrackingCode();
+    const confirmedInfo = {
+      ...(currentInfo || {}),
+      trackingCode: code,
+      isComplete: true,
+      isConfirmed: true,
+    };
     return {
-      reply: ORDER_CONFIRMATION_CLOSING_PHRASE,
-      shippingInfo: {
-        ...(currentInfo || {}),
-        isComplete: true,
-        isConfirmed: true,
-      },
+      reply: formatOrderClosingWithBill(confirmedInfo),
+      shippingInfo: confirmedInfo,
       quickReplies: [],
     };
   }
@@ -2339,7 +2390,11 @@ async function processChatPipeline(
     const { _invalidSenderPhone, _invalidReceiverPhone, ...cleanShippingInfo } = fastExtracted;
 
     if ((isFormPreviouslySent || currentInfo?.isComplete) && isConfirm && !isCorrection) {
-      reply = ORDER_CONFIRMATION_CLOSING_PHRASE;
+      const code = cleanShippingInfo?.trackingCode || currentInfo?.trackingCode || generateTrackingCode();
+      cleanShippingInfo.trackingCode = code;
+      cleanShippingInfo.isComplete = true;
+      cleanShippingInfo.isConfirmed = true;
+      reply = formatOrderClosingWithBill(cleanShippingInfo);
     } else if (evalResult.isComplete) {
       reply = formatOrderConfirmationForm(cleanShippingInfo);
     } else {
@@ -2661,7 +2716,11 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
 
     const userConfirmed = isConfirm || parsed.isCustomerConfirmed === true;
     if ((isFormPreviouslySent || currentInfo?.isComplete) && userConfirmed && !isCorrection) {
-      finalReply = ORDER_CONFIRMATION_CLOSING_PHRASE;
+      const code = mergedInfo?.trackingCode || currentInfo?.trackingCode || generateTrackingCode();
+      mergedInfo.trackingCode = code;
+      mergedInfo.isComplete = true;
+      mergedInfo.isConfirmed = true;
+      finalReply = formatOrderClosingWithBill(mergedInfo);
     } else if (evalResult.isComplete) {
       finalReply = formatOrderConfirmationForm(mergedInfo);
     } else {
@@ -2717,7 +2776,11 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
     let reply = '';
 
     if ((isFormPreviouslySent || currentInfo?.isComplete) && isConfirm && !isCorrection) {
-      reply = ORDER_CONFIRMATION_CLOSING_PHRASE;
+      const code = cleanShippingInfo?.trackingCode || currentInfo?.trackingCode || generateTrackingCode();
+      cleanShippingInfo.trackingCode = code;
+      cleanShippingInfo.isComplete = true;
+      cleanShippingInfo.isConfirmed = true;
+      reply = formatOrderClosingWithBill(cleanShippingInfo);
     } else if (evalResult.isComplete) {
       reply = formatOrderConfirmationForm(cleanFast);
     } else {
@@ -2847,6 +2910,17 @@ async function sendZaloOAReply(userId: string, replyText: string): Promise<boole
     return false;
   }
 }
+
+// API Route: Chủ động gửi phiếu vận đơn sang Zalo cho khách hàng
+app.post('/api/zalo/send-order-bill', async (req: Request, res: Response) => {
+  const { userId, shippingInfo, trackingCode } = req.body || {};
+  if (!userId || !shippingInfo) {
+    return res.status(400).json({ error: 'userId and shippingInfo are required' });
+  }
+  const summaryText = generateShipmentTextSummary(shippingInfo, trackingCode);
+  const success = await sendZaloOAReply(userId, summaryText);
+  return res.json({ success, message: summaryText });
+});
 
 // In-memory conversation state per Zalo User (Preserves full shippingInfo & history)
 interface ZaloUserSession {
