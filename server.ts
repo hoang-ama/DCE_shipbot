@@ -2353,7 +2353,7 @@ async function processChatPipeline(
       isConfirmed: true,
     };
     return {
-      reply: formatOrderClosingWithBill(confirmedInfo),
+      reply: ORDER_CONFIRMATION_CLOSING_PHRASE,
       shippingInfo: confirmedInfo,
       quickReplies: [],
     };
@@ -2394,7 +2394,7 @@ async function processChatPipeline(
       cleanShippingInfo.trackingCode = code;
       cleanShippingInfo.isComplete = true;
       cleanShippingInfo.isConfirmed = true;
-      reply = formatOrderClosingWithBill(cleanShippingInfo);
+      reply = ORDER_CONFIRMATION_CLOSING_PHRASE;
     } else if (evalResult.isComplete) {
       reply = formatOrderConfirmationForm(cleanShippingInfo);
     } else {
@@ -2720,7 +2720,7 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       mergedInfo.trackingCode = code;
       mergedInfo.isComplete = true;
       mergedInfo.isConfirmed = true;
-      finalReply = formatOrderClosingWithBill(mergedInfo);
+      finalReply = ORDER_CONFIRMATION_CLOSING_PHRASE;
     } else if (evalResult.isComplete) {
       finalReply = formatOrderConfirmationForm(mergedInfo);
     } else {
@@ -2780,7 +2780,7 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       cleanShippingInfo.trackingCode = code;
       cleanShippingInfo.isComplete = true;
       cleanShippingInfo.isConfirmed = true;
-      reply = formatOrderClosingWithBill(cleanShippingInfo);
+      reply = ORDER_CONFIRMATION_CLOSING_PHRASE;
     } else if (evalResult.isComplete) {
       reply = formatOrderConfirmationForm(cleanFast);
     } else {
