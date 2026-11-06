@@ -2820,13 +2820,36 @@ app.post('/api/chat', async (req: Request, res: Response) => {
 });
 
 // --- ZALO OA INTEGRATION WITH SESSION MEMORY & AUTO-REFRESH ---
+const TOKEN_CACHE_FILE = path.resolve(__dirname, '.zalo_token.json');
+
 let currentZaloAccessToken = process.env.ZALO_OA_ACCESS_TOKEN || '';
 let currentZaloRefreshToken = process.env.ZALO_REFRESH_TOKEN || '';
+
+// Load cached token from disk if exists
+try {
+  if (fs.existsSync(TOKEN_CACHE_FILE)) {
+    const cached = JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, 'utf-8'));
+    if (cached.access_token) currentZaloAccessToken = cached.access_token;
+    if (cached.refresh_token) currentZaloRefreshToken = cached.refresh_token;
+  }
+} catch (e) {
+  // ignore cache read error
+}
+
+function saveTokenCache(accessToken: string, refreshToken?: string) {
+  try {
+    const data: any = { access_token: accessToken, updated_at: new Date().toISOString() };
+    if (refreshToken) data.refresh_token = refreshToken;
+    fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('[Zalo OA] Could not save token cache file:', e);
+  }
+}
 
 async function refreshZaloAccessToken(): Promise<string | null> {
   const appId = process.env.ZALO_APP_ID || '4541345519906352744';
   const secretKey = process.env.ZALO_APP_SECRET || '';
-  const refreshToken = currentZaloRefreshToken;
+  const refreshToken = currentZaloRefreshToken || process.env.ZALO_REFRESH_TOKEN || '';
 
   if (!appId || !secretKey || !refreshToken) {
     console.warn('[Zalo OA] Missing credentials to auto-refresh token (ZALO_APP_ID, ZALO_APP_SECRET, or ZALO_REFRESH_TOKEN)');
@@ -2855,6 +2878,7 @@ async function refreshZaloAccessToken(): Promise<string | null> {
       if (data.refresh_token) {
         currentZaloRefreshToken = data.refresh_token;
       }
+      saveTokenCache(currentZaloAccessToken, currentZaloRefreshToken);
       console.log('[Zalo OA] Successfully auto-refreshed access token!');
       return currentZaloAccessToken;
     } else {

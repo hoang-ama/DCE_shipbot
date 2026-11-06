@@ -6,3 +6,4 @@ coverage/
 *.log
 !.env.example
 .env
+.zalo_token.json
