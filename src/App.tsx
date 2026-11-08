@@ -11,6 +11,7 @@ import { SamplePromptsModal } from './components/SamplePromptsModal';
 import { OrderHistoryModal } from './components/OrderHistoryModal';
 import { SuccessOrderModal } from './components/SuccessOrderModal';
 import { ZaloStatusModal } from './components/ZaloStatusModal';
+import { CrmModal } from './components/CrmModal';
 import { ChatMessage, ShippingInfo, OrderRecord } from './types';
 import {
   INITIAL_SHIPPING_INFO,
@@ -32,6 +33,7 @@ export default function App() {
   const [isSuccessOpen, setIsSuccessOpen] = useState<boolean>(false);
   const [isZaloOpen, setIsZaloOpen] = useState<boolean>(false);
   const [isZaloConnected, setIsZaloConnected] = useState<boolean | null>(null);
+  const [isCrmOpen, setIsCrmOpen] = useState<boolean>(false);
 
   // Saved orders from localStorage
   const [savedOrders, setSavedOrders] = useState<OrderRecord[]>(() => {
@@ -221,6 +223,22 @@ export default function App() {
     setMessages((prev) => [...prev, systemNotice]);
   };
 
+  const handleLoadOrderFromCrm = (info: any) => {
+    if (info) {
+      setShippingInfo(info);
+      if (info.trackingCode) {
+        setTrackingCode(info.trackingCode);
+      }
+      const systemNotice: ChatMessage = {
+        id: `sys-${Date.now()}`,
+        sender: 'system',
+        text: `Đã nạp dữ liệu đơn hàng từ khách hàng Zalo vào Phiếu Vận Đơn!`,
+        timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      };
+      setMessages((prev) => [...prev, systemNotice]);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-100/70 font-sans text-slate-900 selection:bg-blue-500 selection:text-white">
       {/* Top Header */}
@@ -233,6 +251,7 @@ export default function App() {
         savedOrdersCount={savedOrders.length}
         onOpenZaloStatus={() => setIsZaloOpen(true)}
         isZaloConnected={isZaloConnected}
+        onOpenCrm={() => setIsCrmOpen(true)}
       />
 
       {/* Main App Workspace */}
@@ -290,6 +309,12 @@ export default function App() {
         isOpen={isZaloOpen}
         onClose={() => setIsZaloOpen(false)}
         onStatusUpdate={(connected) => setIsZaloConnected(connected)}
+      />
+
+      <CrmModal
+        isOpen={isCrmOpen}
+        onClose={() => setIsCrmOpen(false)}
+        onLoadOrderToWaybill={handleLoadOrderFromCrm}
       />
     </div>
   );

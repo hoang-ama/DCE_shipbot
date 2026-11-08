@@ -1,5 +1,5 @@
 import React from 'react';
-import { Package, Sparkles, RotateCcw, History, Lightbulb, MessageSquare } from 'lucide-react';
+import { Package, Sparkles, RotateCcw, History, Lightbulb, MessageSquare, Users } from 'lucide-react';
 
 interface HeaderProps {
   hasApiKey: boolean;
@@ -10,6 +10,7 @@ interface HeaderProps {
   savedOrdersCount: number;
   onOpenZaloStatus?: () => void;
   isZaloConnected?: boolean | null;
+  onOpenCrm?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   savedOrdersCount,
   onOpenZaloStatus,
   isZaloConnected,
+  onOpenCrm,
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200 shadow-xs print:hidden">
@@ -48,6 +50,18 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Status & Actions */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* CRM & Zalo Customers Button */}
+          {onOpenCrm && (
+            <button
+              onClick={onOpenCrm}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors shadow-2xs"
+              title="Xem Lịch sử hội thoại & CRM khách hàng Zalo"
+            >
+              <Users className="w-4 h-4 text-indigo-600" />
+              <span className="hidden sm:inline">CRM Khách Zalo</span>
+            </button>
+          )}
+
           {/* Zalo OA Status Button */}
           {onOpenZaloStatus && (
             <button

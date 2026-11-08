@@ -2898,7 +2898,180 @@ interface ZaloUserSession {
 }
 const zaloUserSessions = new Map<string, ZaloUserSession>();
 
-// Initialize PostgreSQL tables and restore tokens & sessions
+// --- CRM DATA STRUCTURES (Customers & Full Chat History) ---
+export interface CrmCustomer {
+  user_id: string;
+  name: string;
+  phone: string;
+  address: string;
+  avatar: string;
+  order_count: number;
+  first_interaction: string;
+  last_interaction: string;
+  last_message: string;
+  shipping_info: any;
+}
+
+export interface CrmMessage {
+  id: number | string;
+  user_id: string;
+  sender: 'user' | 'bot' | 'agent';
+  sender_name: string;
+  message_text: string;
+  shipping_info_snapshot?: any;
+  created_at: string;
+}
+
+const inMemoryCustomers = new Map<string, CrmCustomer>();
+const inMemoryMessages: CrmMessage[] = [];
+
+// Fetch official Zalo user profile if available
+async function fetchZaloUserProfile(userId: string): Promise<{ display_name?: string; avatar?: string; phone?: string } | null> {
+  const token = currentZaloAccessToken || process.env.ZALO_OA_ACCESS_TOKEN || '';
+  if (!token) return null;
+
+  try {
+    const res = await fetch(`https://openapi.zalo.me/v2.0/oa/getprofile?data=${encodeURIComponent(JSON.stringify({ user_id: userId }))}`, {
+      headers: { access_token: token },
+    });
+    const json = await res.json();
+    if (json?.error === 0 && json?.data) {
+      return {
+        display_name: json.data.display_name,
+        avatar: json.data.avatar,
+        phone: json.data.shared_info?.phone ? String(json.data.shared_info.phone) : undefined,
+      };
+    }
+  } catch (_) {}
+  return null;
+}
+
+// Record every message into CRM (both in-memory and PostgreSQL)
+async function recordCrmInteraction(
+  userId: string,
+  sender: 'user' | 'bot' | 'agent',
+  messageText: string,
+  shippingInfo?: any,
+  senderName?: string
+) {
+  const now = new Date().toISOString();
+
+  // Try extracting name, phone, address from shippingInfo if present
+  const detectedName = shippingInfo?.sender?.name || shippingInfo?.receiver?.name || '';
+  const detectedPhone = shippingInfo?.sender?.phone || shippingInfo?.receiver?.phone || '';
+  const detectedAddress = shippingInfo?.pickup?.address || shippingInfo?.receiver?.address || '';
+
+  // Get or initialize customer
+  let customer = inMemoryCustomers.get(userId);
+  if (!customer) {
+    customer = {
+      user_id: userId,
+      name: detectedName || `Khách Zalo (${userId.slice(-4)})`,
+      phone: detectedPhone || '',
+      address: detectedAddress || '',
+      avatar: '',
+      order_count: shippingInfo?.isComplete || shippingInfo?.isConfirmed ? 1 : 0,
+      first_interaction: now,
+      last_interaction: now,
+      last_message: messageText,
+      shipping_info: shippingInfo || {},
+    };
+    inMemoryCustomers.set(userId, customer);
+
+    // Try fetching Zalo profile in background
+    fetchZaloUserProfile(userId).then((profile) => {
+      if (profile && customer) {
+        if (profile.display_name) customer.name = profile.display_name;
+        if (profile.avatar) customer.avatar = profile.avatar;
+        if (profile.phone && !customer.phone) customer.phone = profile.phone;
+        if (dbPool) {
+          dbPool.query(
+            `UPDATE crm_customers SET name = $1, avatar = $2, phone = COALESCE(NULLIF(phone, ''), $3) WHERE user_id = $4`,
+            [customer.name, customer.avatar, customer.phone, userId]
+          ).catch(() => {});
+        }
+      }
+    });
+  } else {
+    customer.last_interaction = now;
+    customer.last_message = messageText;
+    if (detectedName && (customer.name.startsWith('Khách Zalo') || !customer.name)) {
+      customer.name = detectedName;
+    }
+    if (detectedPhone && !customer.phone) {
+      customer.phone = detectedPhone;
+    }
+    if (detectedAddress && !customer.address) {
+      customer.address = detectedAddress;
+    }
+    if (shippingInfo) {
+      customer.shipping_info = shippingInfo;
+      if (shippingInfo.isComplete || shippingInfo.isConfirmed) {
+        customer.order_count = (customer.order_count || 0) + 1;
+      }
+    }
+  }
+
+  // Record Message
+  const resolvedSenderName = senderName || (sender === 'user' ? customer.name : sender === 'agent' ? 'Tư vấn viên' : 'ShipBot AI');
+  const msgEntry: CrmMessage = {
+    id: Date.now() + Math.random(),
+    user_id: userId,
+    sender,
+    sender_name: resolvedSenderName,
+    message_text: messageText,
+    shipping_info_snapshot: shippingInfo || null,
+    created_at: now,
+  };
+  inMemoryMessages.push(msgEntry);
+  if (inMemoryMessages.length > 2000) inMemoryMessages.shift();
+
+  // Persist to PostgreSQL if connected
+  if (dbPool) {
+    try {
+      await dbPool.query(`
+        INSERT INTO crm_customers (user_id, name, phone, address, avatar, order_count, first_interaction, last_interaction, last_message, shipping_info)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ON CONFLICT (user_id) DO UPDATE
+        SET name = COALESCE(NULLIF(EXCLUDED.name, ''), crm_customers.name),
+            phone = COALESCE(NULLIF(EXCLUDED.phone, ''), crm_customers.phone),
+            address = COALESCE(NULLIF(EXCLUDED.address, ''), crm_customers.address),
+            avatar = COALESCE(NULLIF(EXCLUDED.avatar, ''), crm_customers.avatar),
+            order_count = crm_customers.order_count + (CASE WHEN ($10::jsonb->>'isConfirmed')::boolean = true THEN 1 ELSE 0 END),
+            last_interaction = EXCLUDED.last_interaction,
+            last_message = EXCLUDED.last_message,
+            shipping_info = EXCLUDED.shipping_info;
+      `, [
+        customer.user_id,
+        customer.name,
+        customer.phone,
+        customer.address,
+        customer.avatar,
+        customer.order_count,
+        customer.first_interaction,
+        customer.last_interaction,
+        customer.last_message,
+        JSON.stringify(customer.shipping_info || {}),
+      ]);
+
+      await dbPool.query(`
+        INSERT INTO crm_messages (user_id, sender, sender_name, message_text, shipping_info_snapshot, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6);
+      `, [
+        userId,
+        sender,
+        resolvedSenderName,
+        messageText,
+        shippingInfo ? JSON.stringify(shippingInfo) : null,
+        now,
+      ]);
+    } catch (dbErr: any) {
+      console.error('[CRM Database] Error saving CRM record:', dbErr?.message);
+    }
+  }
+}
+
+// Initialize PostgreSQL tables and restore tokens, sessions & CRM data
 async function initDatabaseAndRestore() {
   if (!dbPool) return;
   try {
@@ -2914,8 +3087,31 @@ async function initDatabaseAndRestore() {
         session_data JSONB NOT NULL,
         last_active TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS crm_customers (
+        user_id VARCHAR(100) PRIMARY KEY,
+        name VARCHAR(255),
+        phone VARCHAR(50),
+        address TEXT,
+        avatar TEXT,
+        order_count INT DEFAULT 0,
+        first_interaction TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_interaction TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        last_message TEXT,
+        shipping_info JSONB
+      );
+      CREATE TABLE IF NOT EXISTS crm_messages (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(100) NOT NULL,
+        sender VARCHAR(20) NOT NULL,
+        sender_name VARCHAR(255),
+        message_text TEXT NOT NULL,
+        shipping_info_snapshot JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_crm_messages_user_id ON crm_messages(user_id);
+      CREATE INDEX IF NOT EXISTS idx_crm_customers_last_interaction ON crm_customers(last_interaction DESC);
     `);
-    console.log('[Database] Tables initialized successfully.');
+    console.log('[Database] PostgreSQL tables (auth, sessions, CRM) initialized successfully.');
 
     // 1. Restore tokens from PostgreSQL
     const tokenRes = await dbPool.query(`SELECT access_token, refresh_token, updated_at FROM zalo_auth WHERE id = 'default' LIMIT 1`);
@@ -2934,6 +3130,43 @@ async function initDatabaseAndRestore() {
     }
     if (sessRes.rows.length > 0) {
       console.log(`[Database] Successfully restored ${sessRes.rows.length} active sessions from PostgreSQL!`);
+    }
+
+    // 3. Restore CRM Customers from PostgreSQL
+    const custRes = await dbPool.query(`SELECT * FROM crm_customers ORDER BY last_interaction DESC LIMIT 100`);
+    for (const r of custRes.rows) {
+      inMemoryCustomers.set(r.user_id, {
+        user_id: r.user_id,
+        name: r.name || `Khách Zalo (${r.user_id.slice(-4)})`,
+        phone: r.phone || '',
+        address: r.address || '',
+        avatar: r.avatar || '',
+        order_count: r.order_count || 0,
+        first_interaction: r.first_interaction ? new Date(r.first_interaction).toISOString() : new Date().toISOString(),
+        last_interaction: r.last_interaction ? new Date(r.last_interaction).toISOString() : new Date().toISOString(),
+        last_message: r.last_message || '',
+        shipping_info: r.shipping_info || {},
+      });
+    }
+    if (custRes.rows.length > 0) {
+      console.log(`[Database] Successfully restored ${custRes.rows.length} CRM customers from PostgreSQL!`);
+    }
+
+    // 4. Restore recent CRM Messages from PostgreSQL
+    const msgRes = await dbPool.query(`SELECT * FROM crm_messages ORDER BY created_at DESC LIMIT 500`);
+    for (const r of msgRes.rows.reverse()) {
+      inMemoryMessages.push({
+        id: r.id,
+        user_id: r.user_id,
+        sender: r.sender,
+        sender_name: r.sender_name,
+        message_text: r.message_text,
+        shipping_info_snapshot: r.shipping_info_snapshot,
+        created_at: new Date(r.created_at).toISOString(),
+      });
+    }
+    if (msgRes.rows.length > 0) {
+      console.log(`[Database] Successfully restored ${msgRes.rows.length} CRM messages from PostgreSQL!`);
     }
   } catch (e: any) {
     console.error('[Database] Failed to init or restore from PostgreSQL:', e?.message);
@@ -3150,6 +3383,9 @@ app.post('/api/zalo/send-order-bill', async (req: Request, res: Response) => {
   }
   const summaryText = generateShipmentTextSummary(shippingInfo, trackingCode);
   const success = await sendZaloOAReply(userId, summaryText);
+  if (success) {
+    await recordCrmInteraction(userId, 'bot', summaryText, shippingInfo, 'Phiếu Vận Đơn (ShipBot)');
+  }
   return res.json({ success, message: summaryText });
 });
 
@@ -3459,12 +3695,16 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
         zaloUserSessions.set(userId, session);
       }
 
+      // Record incoming customer message in CRM
+      await recordCrmInteraction(userId, 'user', userText, session.currentInfo);
+
       if (isResetOrder) {
         const resetReply = 'Dạ em đã tạo phiên đơn mới rồi ạ. Bên em chuyên dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Anh/chị cho em xin thông tin địa chỉ lấy và giao hàng nhé!';
         session.history.push({ role: 'user', content: userText });
         session.history.push({ role: 'model', content: resetReply });
         saveSessionsCache();
         await sendZaloOAReply(userId, resetReply);
+        await recordCrmInteraction(userId, 'bot', resetReply, session.currentInfo);
         return;
       }
 
@@ -3484,11 +3724,129 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
 
       saveSessionsCache();
       await sendZaloOAReply(userId, result.reply);
+      // Record outgoing bot response in CRM
+      await recordCrmInteraction(userId, 'bot', result.reply, result.shippingInfo);
     } catch (err: any) {
       logZaloEvent('error', `Lỗi xử lý tin nhắn của user ${userId}: ${err?.message}`);
       console.error('[Zalo OA] Error processing chat reply:', err?.message);
     }
   }
+});
+
+// --- CRM REST API ENDPOINTS ---
+
+// GET /api/crm/customers - Lấy danh sách khách hàng Zalo OA
+app.get('/api/crm/customers', async (req: Request, res: Response) => {
+  const search = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
+
+  if (dbPool) {
+    try {
+      let query = `SELECT * FROM crm_customers`;
+      const params: any[] = [];
+      if (search) {
+        query += ` WHERE LOWER(name) LIKE $1 OR phone LIKE $1 OR LOWER(last_message) LIKE $1 OR user_id LIKE $1`;
+        params.push(`%${search}%`);
+      }
+      query += ` ORDER BY last_interaction DESC LIMIT 100`;
+      const result = await dbPool.query(query, params);
+      return res.json(result.rows);
+    } catch (e: any) {
+      console.error('[CRM API] Error querying customers from DB:', e?.message);
+    }
+  }
+
+  // Fallback to in-memory customers
+  let list = Array.from(inMemoryCustomers.values());
+  if (search) {
+    list = list.filter(
+      (c) =>
+        c.name.toLowerCase().includes(search) ||
+        c.phone.includes(search) ||
+        c.last_message.toLowerCase().includes(search) ||
+        c.user_id.includes(search)
+    );
+  }
+  list.sort((a, b) => new Date(b.last_interaction).getTime() - new Date(a.last_interaction).getTime());
+  return res.json(list);
+});
+
+// GET /api/crm/customers/:userId/messages - Lấy toàn bộ lịch sử tin nhắn của một khách hàng
+app.get('/api/crm/customers/:userId/messages', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+
+  if (dbPool) {
+    try {
+      const result = await dbPool.query(
+        `SELECT * FROM crm_messages WHERE user_id = $1 ORDER BY created_at ASC LIMIT 500`,
+        [userId]
+      );
+      return res.json(result.rows);
+    } catch (e: any) {
+      console.error('[CRM API] Error querying messages from DB:', e?.message);
+    }
+  }
+
+  // Fallback to in-memory messages
+  const list = inMemoryMessages.filter((m) => m.user_id === userId);
+  return res.json(list);
+});
+
+// POST /api/crm/customers/:userId/send - Nhân viên tư vấn nhắn tin trực tiếp tới khách qua Zalo OA
+app.post('/api/crm/customers/:userId/send', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const { text, agentName } = req.body || {};
+
+  if (!text || typeof text !== 'string') {
+    return res.status(400).json({ error: 'Nội dung tin nhắn không được để trống' });
+  }
+
+  const session = zaloUserSessions.get(userId);
+  const success = await sendZaloOAReply(userId, text.trim());
+
+  if (success) {
+    await recordCrmInteraction(
+      userId,
+      'agent',
+      text.trim(),
+      session?.currentInfo,
+      agentName || 'Tư vấn viên (Web)'
+    );
+
+    if (session) {
+      session.history.push({ role: 'model', content: text.trim() });
+      saveSessionsCache();
+    }
+
+    return res.json({ success: true, message: 'Đã gửi tin nhắn tới Zalo khách hàng thành công!' });
+  } else {
+    return res.status(500).json({ success: false, error: 'Không thể gửi tin nhắn qua Zalo OA. Kiểm tra Access Token!' });
+  }
+});
+
+// PUT /api/crm/customers/:userId - Cập nhật thông tin khách hàng (Tên, SĐT, Địa chỉ)
+app.put('/api/crm/customers/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const { name, phone, address } = req.body || {};
+
+  const customer = inMemoryCustomers.get(userId);
+  if (customer) {
+    if (name) customer.name = name;
+    if (phone) customer.phone = phone;
+    if (address) customer.address = address;
+  }
+
+  if (dbPool) {
+    try {
+      await dbPool.query(
+        `UPDATE crm_customers SET name = COALESCE($1, name), phone = COALESCE($2, phone), address = COALESCE($3, address) WHERE user_id = $4`,
+        [name || null, phone || null, address || null, userId]
+      );
+    } catch (e: any) {
+      console.error('[CRM API] Error updating customer:', e?.message);
+    }
+  }
+
+  return res.json({ success: true, customer });
 });
 
 // Render Keepalive to prevent free tier idle spin-down
