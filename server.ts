@@ -3,6 +3,7 @@ import fs from 'fs';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import pg from 'pg';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import { resolveAdministrativeAddress, parseGoogleMapsLocation } from './src/data/vnAdministrative';
 
@@ -2846,11 +2847,27 @@ app.post('/api/chat', async (req: Request, res: Response) => {
 });
 
 // --- ZALO OA INTEGRATION WITH SESSION MEMORY & AUTO-REFRESH ---
+const { Pool } = pg;
 const TOKEN_CACHE_FILE = path.resolve(__dirname, '.zalo_token.json');
 const SESSIONS_CACHE_FILE = path.resolve(__dirname, '.zalo_sessions.json');
 
 let currentZaloAccessToken = process.env.ZALO_OA_ACCESS_TOKEN || '';
 let currentZaloRefreshToken = process.env.ZALO_REFRESH_TOKEN || '';
+let lastTokenRefreshTimestamp = Date.now();
+
+// PostgreSQL persistent storage (SURVIVES ALL RENDER RESTARTS & DEPLOYMENTS!)
+let dbPool: pg.Pool | null = null;
+if (process.env.DATABASE_URL) {
+  try {
+    dbPool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false },
+    });
+    console.log('[Database] PostgreSQL connection pool initialized from DATABASE_URL.');
+  } catch (err: any) {
+    console.warn('[Database] Failed to init PostgreSQL pool:', err?.message);
+  }
+}
 
 // In-memory ring buffer for recent Zalo events (for live debugging & UI monitor)
 interface ZaloLogEntry {
@@ -2873,12 +2890,63 @@ function logZaloEvent(type: ZaloLogEntry['type'], summary: string, details?: any
   console.log(`[Zalo OA Event] [${type}] ${summary}`);
 }
 
-// Load cached token from disk if exists
+// In-memory conversation state per Zalo User (Preserves full shippingInfo & history)
+interface ZaloUserSession {
+  history: Array<{ role: 'user' | 'model'; content: string }>;
+  currentInfo: any;
+  lastActive: number;
+}
+const zaloUserSessions = new Map<string, ZaloUserSession>();
+
+// Initialize PostgreSQL tables and restore tokens & sessions
+async function initDatabaseAndRestore() {
+  if (!dbPool) return;
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS zalo_auth (
+        id VARCHAR(50) PRIMARY KEY,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS zalo_sessions (
+        user_id VARCHAR(100) PRIMARY KEY,
+        session_data JSONB NOT NULL,
+        last_active TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+    console.log('[Database] Tables initialized successfully.');
+
+    // 1. Restore tokens from PostgreSQL
+    const tokenRes = await dbPool.query(`SELECT access_token, refresh_token, updated_at FROM zalo_auth WHERE id = 'default' LIMIT 1`);
+    if (tokenRes.rows.length > 0) {
+      const row = tokenRes.rows[0];
+      if (row.access_token) currentZaloAccessToken = row.access_token;
+      if (row.refresh_token) currentZaloRefreshToken = row.refresh_token;
+      if (row.updated_at) lastTokenRefreshTimestamp = new Date(row.updated_at).getTime();
+      console.log('[Database] Successfully restored active Zalo tokens from PostgreSQL!');
+    }
+
+    // 2. Restore active sessions from PostgreSQL
+    const sessRes = await dbPool.query(`SELECT user_id, session_data FROM zalo_sessions`);
+    for (const r of sessRes.rows) {
+      zaloUserSessions.set(r.user_id, r.session_data);
+    }
+    if (sessRes.rows.length > 0) {
+      console.log(`[Database] Successfully restored ${sessRes.rows.length} active sessions from PostgreSQL!`);
+    }
+  } catch (e: any) {
+    console.error('[Database] Failed to init or restore from PostgreSQL:', e?.message);
+  }
+}
+initDatabaseAndRestore();
+
+// Load cached token from disk if exists (local fallback)
 try {
   if (fs.existsSync(TOKEN_CACHE_FILE)) {
     const cached = JSON.parse(fs.readFileSync(TOKEN_CACHE_FILE, 'utf-8'));
-    if (cached.access_token) currentZaloAccessToken = cached.access_token;
-    if (cached.refresh_token) currentZaloRefreshToken = cached.refresh_token;
+    if (cached.access_token && !currentZaloAccessToken) currentZaloAccessToken = cached.access_token;
+    if (cached.refresh_token && !currentZaloRefreshToken) currentZaloRefreshToken = cached.refresh_token;
   }
 } catch (e) {
   // ignore cache read error
@@ -2892,22 +2960,30 @@ function saveTokenCache(accessToken: string, refreshToken?: string) {
   } catch (e) {
     console.warn('[Zalo OA] Could not save token cache file:', e);
   }
-}
 
-// In-memory conversation state per Zalo User (Preserves full shippingInfo & history)
-interface ZaloUserSession {
-  history: Array<{ role: 'user' | 'model'; content: string }>;
-  currentInfo: any;
-  lastActive: number;
+  // Persist to PostgreSQL if connected
+  if (dbPool) {
+    dbPool.query(`
+      INSERT INTO zalo_auth (id, access_token, refresh_token, updated_at)
+      VALUES ('default', $1, $2, NOW())
+      ON CONFLICT (id) DO UPDATE
+      SET access_token = EXCLUDED.access_token,
+          refresh_token = COALESCE(EXCLUDED.refresh_token, zalo_auth.refresh_token),
+          updated_at = NOW();
+    `, [accessToken, refreshToken || null]).catch((err) => {
+      console.error('[Database] Failed to save token to PostgreSQL:', err?.message);
+    });
+  }
 }
-const zaloUserSessions = new Map<string, ZaloUserSession>();
 
 function loadSessionsCache() {
   try {
     if (fs.existsSync(SESSIONS_CACHE_FILE)) {
       const obj = JSON.parse(fs.readFileSync(SESSIONS_CACHE_FILE, 'utf-8'));
       for (const [k, v] of Object.entries(obj)) {
-        zaloUserSessions.set(k, v as ZaloUserSession);
+        if (!zaloUserSessions.has(k)) {
+          zaloUserSessions.set(k, v as ZaloUserSession);
+        }
       }
       console.log(`[Zalo OA] Loaded ${zaloUserSessions.size} active sessions from disk.`);
     }
@@ -2925,6 +3001,18 @@ function saveSessionsCache() {
     fs.writeFileSync(SESSIONS_CACHE_FILE, JSON.stringify(obj, null, 2), 'utf-8');
   } catch (e) {
     // ignore
+  }
+
+  // Persist to PostgreSQL
+  if (dbPool) {
+    for (const [uid, sess] of zaloUserSessions.entries()) {
+      dbPool.query(`
+        INSERT INTO zalo_sessions (user_id, session_data, last_active)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (user_id) DO UPDATE
+        SET session_data = EXCLUDED.session_data, last_active = NOW();
+      `, [uid, JSON.stringify(sess)]).catch(() => {});
+    }
   }
 }
 
@@ -3065,8 +3153,125 @@ app.post('/api/zalo/send-order-bill', async (req: Request, res: Response) => {
   return res.json({ success, message: summaryText });
 });
 
+// Proactive Token Refresher: Checks every 30 minutes and auto-refreshes before the 25-hour limit (at 18 hours)
+setInterval(async () => {
+  const token = currentZaloAccessToken || process.env.ZALO_OA_ACCESS_TOKEN || '';
+  const refreshToken = currentZaloRefreshToken || process.env.ZALO_REFRESH_TOKEN || '';
+  if (!token || !refreshToken) return;
+
+  const hoursElapsed = (Date.now() - lastTokenRefreshTimestamp) / (1000 * 60 * 60);
+
+  // Auto-refresh proactively every 18 hours (well before 25h expiration limit!)
+  if (hoursElapsed >= 18) {
+    console.log(`[Zalo OA] Proactive auto-refresh triggered (token age: ${hoursElapsed.toFixed(1)}h)...`);
+    logZaloEvent('token_refresh', `Đang tự động gia hạn định kỳ (token age: ${hoursElapsed.toFixed(1)}h)...`);
+    const newToken = await refreshZaloAccessToken();
+    if (newToken) {
+      lastTokenRefreshTimestamp = Date.now();
+      console.log('[Zalo OA] Proactive token auto-refresh successfully executed!');
+    }
+  }
+}, 30 * 60 * 1000);
+
+// API Route: 1-Click Zalo OA Authorization Login (Redirects to official Zalo permission screen)
+app.get('/api/zalo/oauth/login', (req: Request, res: Response) => {
+  const appId = process.env.ZALO_APP_ID || '4541345519906352744';
+  const redirectUri = `${req.protocol}://${req.get('host')}/api/zalo/oauth/callback`;
+  const zaloAuthUrl = `https://oauth.zalo.me/v4/oa/permission?app_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  res.redirect(zaloAuthUrl);
+});
+
+// API Route: Zalo OAuth Callback handler (Auto-exchanges authorization code for Access & Refresh tokens)
+app.get('/api/zalo/oauth/callback', async (req: Request, res: Response) => {
+  const { code, oa_id } = req.query;
+  const appId = process.env.ZALO_APP_ID || '4541345519906352744';
+  const secretKey = process.env.ZALO_APP_SECRET || '';
+
+  if (!code || typeof code !== 'string') {
+    return res.status(400).send(`
+      <!DOCTYPE html>
+      <html>
+        <head><meta charset="utf-8"><title>Lỗi Ủy Quyền Zalo</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 40px; background: #f8fafc;">
+          <h2 style="color: #ef4444;">Ủy quyền thất bại</h2>
+          <p>Không nhận được mã xác thực (code) từ Zalo OAuth.</p>
+          <a href="/" style="display: inline-block; background: #2563eb; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none;">Quay lại ShipBot</a>
+        </body>
+      </html>
+    `);
+  }
+
+  try {
+    const bodyParams = new URLSearchParams({
+      code,
+      app_id: appId,
+      grant_type: 'authorization_code',
+    });
+
+    const tokenRes = await fetch('https://oauth.zalo.me/v4/oa/access_token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'secret_key': secretKey,
+      },
+      body: bodyParams.toString(),
+    });
+
+    const tokenData = await tokenRes.json();
+    if (tokenData?.access_token) {
+      currentZaloAccessToken = tokenData.access_token;
+      if (tokenData.refresh_token) {
+        currentZaloRefreshToken = tokenData.refresh_token;
+      }
+      saveTokenCache(currentZaloAccessToken, currentZaloRefreshToken);
+      lastTokenRefreshTimestamp = Date.now();
+      logZaloEvent('token_update', 'Kết nối Zalo OA thành công qua 1-Click OAuth!', { oa_id });
+
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Kết Nối Zalo OA Thành Công</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+          </head>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f8fafc; color: #1e293b;">
+            <div style="background: white; padding: 36px 32px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.06); text-align: center; max-width: 440px; border: 1px solid #e2e8f0;">
+              <div style="width: 64px; height: 64px; background: #ecfdf5; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 32px;">
+                🎉
+              </div>
+              <h2 style="color: #065f46; margin: 0 0 10px 0; font-size: 22px;">Kết Nối Zalo OA Thành Công!</h2>
+              <p style="color: #64748b; font-size: 14px; line-height: 1.6; margin: 0 0 24px 0;">
+                ShipBot đã tự động lấy và kích hoạt <strong>Access Token</strong> mới. Token sẽ được hệ thống tự động gia hạn định kỳ.
+              </p>
+              <a href="/" style="display: inline-block; background: #2563eb; color: white; padding: 12px 28px; border-radius: 12px; text-decoration: none; font-weight: 600; font-size: 14px; box-shadow: 0 4px 12px rgba(37,99,235,0.2);">
+                Quay lại ShipBot
+              </a>
+            </div>
+          </body>
+        </html>
+      `);
+    } else {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+          <head><meta charset="utf-8"><title>Lỗi Lấy Token</title></head>
+          <body style="font-family: sans-serif; text-align: center; padding: 40px; background: #f8fafc;">
+            <h2 style="color: #ef4444;">Lỗi lấy Token từ Zalo</h2>
+            <pre style="background: #f1f5f9; padding: 16px; border-radius: 8px; text-align: left; display: inline-block; font-size: 12px;">${JSON.stringify(tokenData, null, 2)}</pre>
+            <br><br>
+            <a href="/" style="display: inline-block; background: #2563eb; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none;">Quay lại ShipBot</a>
+          </body>
+        </html>
+      `);
+    }
+  } catch (err: any) {
+    return res.status(500).send(`Lỗi hệ thống: ${err?.message}`);
+  }
+});
+
 // Diagnostic API: Kiểm tra trạng thái kết nối Zalo OA, Token & Logs
-app.get('/api/zalo/status', async (_req: Request, res: Response) => {
+app.get('/api/zalo/status', async (req: Request, res: Response) => {
   const token = currentZaloAccessToken || process.env.ZALO_OA_ACCESS_TOKEN || '';
   const refreshToken = currentZaloRefreshToken || process.env.ZALO_REFRESH_TOKEN || '';
   const appId = process.env.ZALO_APP_ID || '4541345519906352744';
@@ -3114,11 +3319,21 @@ app.get('/api/zalo/status', async (_req: Request, res: Response) => {
     }
   }
 
+  const callbackUrl = `${req.protocol}://${req.get('host')}/api/zalo/oauth/callback`;
+
   res.json({
     connected: tokenValid,
     tokenValid,
     zaloError,
     zaloMessage,
+    database: {
+      connected: Boolean(dbPool),
+      type: dbPool ? 'PostgreSQL (Vĩnh viễn)' : 'Chưa cấu hình DATABASE_URL (Chỉ lưu RAM)',
+    },
+    oauth: {
+      loginUrl: '/api/zalo/oauth/login',
+      callbackUrl,
+    },
     config: {
       appId,
       hasAppSecret: hasSecret,
@@ -3131,6 +3346,7 @@ app.get('/api/zalo/status', async (_req: Request, res: Response) => {
       activeSessions: zaloUserSessions.size,
       serverTime: new Date().toISOString(),
       uptimeSeconds: Math.floor(process.uptime()),
+      tokenAgeHours: parseFloat(((Date.now() - lastTokenRefreshTimestamp) / (1000 * 60 * 60)).toFixed(1)),
     },
     logs: zaloLogHistory.slice(0, 20),
   });

@@ -11,6 +11,8 @@ import {
   HelpCircle,
   Copy,
   Check,
+  Database,
+  Zap,
 } from 'lucide-react';
 
 interface ZaloStatusData {
@@ -18,6 +20,14 @@ interface ZaloStatusData {
   tokenValid: boolean;
   zaloError: number | null;
   zaloMessage: string;
+  database?: {
+    connected: boolean;
+    type: string;
+  };
+  oauth?: {
+    loginUrl: string;
+    callbackUrl: string;
+  };
   config: {
     appId: string;
     hasAppSecret: boolean;
@@ -30,6 +40,7 @@ interface ZaloStatusData {
     activeSessions: number;
     serverTime: string;
     uptimeSeconds: number;
+    tokenAgeHours?: number;
   };
   logs: Array<{
     timestamp: string;
@@ -56,8 +67,9 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
   const [refreshTokenInput, setRefreshTokenInput] = useState('');
   const [actionMessage, setActionMessage] = useState<{ text: string; isError: boolean } | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'update' | 'logs' | 'guide'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'update' | 'database' | 'logs' | 'guide'>('overview');
   const [copied, setCopied] = useState(false);
+  const [copiedCallback, setCopiedCallback] = useState(false);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -150,6 +162,13 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const copyCallbackUrl = () => {
+    const url = `${window.location.origin}/api/zalo/oauth/callback`;
+    navigator.clipboard.writeText(url);
+    setCopiedCallback(true);
+    setTimeout(() => setCopiedCallback(false), 2000);
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -167,7 +186,7 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-slate-800">Trạng Thái Kết Nối Zalo OA</h3>
+                <h3 className="text-base font-bold text-slate-800">Quản Lý & Kết Nối Zalo OA</h3>
                 <span
                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${
                     data?.connected
@@ -183,7 +202,7 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
                   {data?.connected ? 'Đang Hoạt Động' : 'Mất Kết Nối'}
                 </span>
               </div>
-              <p className="text-xs text-slate-500">Giám sát & Quản lý Access Token, Webhook Zalo OA</p>
+              <p className="text-xs text-slate-500">Tự động gia hạn liên tục, lưu trữ vĩnh viễn & 1-Click ủy quyền</p>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -206,10 +225,10 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-slate-200 bg-white px-5 gap-2 text-xs font-semibold">
+        <div className="flex border-b border-slate-200 bg-white px-5 gap-1 text-xs font-semibold overflow-x-auto">
           <button
             onClick={() => setActiveTab('overview')}
-            className={`py-2.5 px-3 border-b-2 transition-colors ${
+            className={`py-2.5 px-3 border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'overview'
                 ? 'border-blue-600 text-blue-600 font-bold'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -218,18 +237,29 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
             Tổng quan & Trạng thái
           </button>
           <button
+            onClick={() => setActiveTab('database')}
+            className={`py-2.5 px-3 border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'database'
+                ? 'border-blue-600 text-blue-600 font-bold'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Database className="w-3.5 h-3.5" />
+            Lưu Vĩnh Viễn (DB)
+          </button>
+          <button
             onClick={() => setActiveTab('update')}
-            className={`py-2.5 px-3 border-b-2 transition-colors ${
+            className={`py-2.5 px-3 border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'update'
                 ? 'border-blue-600 text-blue-600 font-bold'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
-            Cập nhật Token
+            Dán Token
           </button>
           <button
             onClick={() => setActiveTab('logs')}
-            className={`py-2.5 px-3 border-b-2 transition-colors ${
+            className={`py-2.5 px-3 border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'logs'
                 ? 'border-blue-600 text-blue-600 font-bold'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -239,13 +269,13 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('guide')}
-            className={`py-2.5 px-3 border-b-2 transition-colors ${
+            className={`py-2.5 px-3 border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'guide'
                 ? 'border-blue-600 text-blue-600 font-bold'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
-            Hướng dẫn Debug
+            Giải pháp triệt để
           </button>
         </div>
 
@@ -293,16 +323,59 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
                   <p className="text-slate-600">
                     Chi tiết: <strong className="font-mono">{data?.zaloMessage || 'Đang kiểm tra...'}</strong>
                   </p>
-                  {data?.zaloError === -216 && (
-                    <p className="text-rose-700 font-semibold mt-1">
-                      👉 Nguyên nhân: Access Token có hạn 25 giờ và đã hết hạn. Hãy chuyển qua tab "Cập nhật Token" để dán mã mới!
+                  {data?.stats?.tokenAgeHours !== undefined && (
+                    <p className="text-slate-500 text-[11px]">
+                      Tuổi của Access Token: <strong>{data.stats.tokenAgeHours} giờ</strong> (Hệ thống tự động gia hạn trước khi chạm mốc 25h).
                     </p>
                   )}
                 </div>
               </div>
 
+              {/* 1-Click Fast Re-Auth Banner */}
+              <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5 font-bold text-xs text-blue-900">
+                    <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
+                    Ủy Quyền 1-Click (Không cần vào API Explorer)
+                  </div>
+                  <p className="text-[11px] text-slate-600">
+                    Chỉ cần bấm nút, đăng nhập Zalo và xác nhận cấp quyền cho OA Đi Chung Express.
+                  </p>
+                </div>
+                <a
+                  href="/api/zalo/oauth/login"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs flex items-center gap-1 shrink-0"
+                >
+                  Kết Nối Ngay <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+
               {/* Grid Thông số */}
               <div className="grid grid-cols-2 gap-3 text-xs">
+                {/* Database Status Card */}
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                  <span className="text-slate-500 font-medium flex items-center gap-1">
+                    <Database className="w-3 h-3" /> Cơ sở dữ liệu lưu vĩnh viễn
+                  </span>
+                  <div className="flex items-center gap-1 text-[11px] font-semibold">
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        data?.database?.connected ? 'bg-emerald-500' : 'bg-amber-500'
+                      }`}
+                    />
+                    <span className={data?.database?.connected ? 'text-emerald-700' : 'text-amber-800'}>
+                      {data?.database?.connected ? 'PostgreSQL (Vĩnh viễn)' : 'Chưa gắn DB (Chỉ lưu RAM)'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    {data?.database?.connected
+                      ? 'Token an toàn khi Render ngủ hoặc redeploy'
+                      : 'Bấm tab "Lưu Vĩnh Viễn" để gắn DB miễn phí'}
+                  </p>
+                </div>
+
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
                   <span className="text-slate-500 font-medium">Access Token hiện hành</span>
                   <div className="font-mono font-semibold text-slate-800 truncate">
@@ -313,16 +386,6 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
                     <span className={data?.tokenValid ? 'text-emerald-700' : 'text-rose-700 font-semibold'}>
                       {data?.tokenValid ? 'Hợp lệ' : 'Không hợp lệ / Hết hạn'}
                     </span>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
-                  <span className="text-slate-500 font-medium">Refresh Token</span>
-                  <div className="font-mono font-semibold text-slate-800 truncate">
-                    {data?.config.refreshTokenMasked || 'Chưa cấu hình'}
-                  </div>
-                  <div className="text-[11px] text-slate-500">
-                    {data?.config.hasRefreshToken ? 'Đã lưu trên hệ thống' : 'Chưa lưu'}
                   </div>
                 </div>
 
@@ -356,9 +419,9 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setActiveTab('update')}
-                  className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs"
+                  className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-colors shadow-xs"
                 >
-                  Dán & Cập nhật Token mới
+                  Dán & Cập nhật Token thủ công
                 </button>
                 <button
                   type="button"
@@ -373,7 +436,62 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: UPDATE TOKEN */}
+          {/* TAB 2: DATABASE PERSISTENCE */}
+          {activeTab === 'database' && (
+            <div className="space-y-4 text-xs">
+              <div
+                className={`p-4 rounded-xl border flex items-start gap-3 ${
+                  data?.database?.connected
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    : 'bg-amber-50 border-amber-200 text-amber-900'
+                }`}
+              >
+                <Database className={`w-5 h-5 shrink-0 ${data?.database?.connected ? 'text-emerald-600' : 'text-amber-600'}`} />
+                <div className="space-y-1">
+                  <p className="font-bold text-sm">
+                    {data?.database?.connected
+                      ? 'Đã kết nối PostgreSQL: Token & Phiên chat được lưu vĩnh viễn!'
+                      : 'Chưa gắn DATABASE_URL: Token chỉ lưu trên RAM và file tạm'}
+                  </p>
+                  <p className="text-slate-600 leading-relaxed text-[11px]">
+                    {data?.database?.connected
+                      ? 'Mỗi khi Zalo tự động gia hạn cặp Access/Refresh Token mới, mã sẽ được ghi trực tiếp vào PostgreSQL. Ngay cả khi Render sleep, restart hoặc redeploy, hệ thống vẫn duy trì token liên tục không bao giờ mất.'
+                      : 'Trên Render Free Tier, mỗi lần container restart hoặc sau 15 phút không có khách nhắn tin, ổ đĩa tạm bị xóa sạch. Nếu có PostgreSQL, dữ liệu không bao giờ bị mất.'}
+                  </p>
+                </div>
+              </div>
+
+              {!data?.database?.connected && (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                  <p className="font-bold text-slate-900 text-sm">
+                    🚀 Cách kích hoạt PostgreSQL miễn phí trên Render (1 phút):
+                  </p>
+                  <ol className="list-decimal list-inside space-y-2 text-slate-700 text-[11px] leading-relaxed">
+                    <li>
+                      Vào <strong>dashboard.render.com</strong> &rarr; Nhấn nút <strong>+ New</strong> (góc trên bên phải) &rarr; Chọn <strong>PostgreSQL</strong>.
+                    </li>
+                    <li>
+                      Đặt tên là <code className="bg-slate-200 px-1 rounded">dce-shipbot-db</code>, chọn <strong>Free Plan</strong> &rarr; Bấm <strong>Create Database</strong>.
+                    </li>
+                    <li>
+                      Sau khi DB tạo xong, copy dòng <strong>Internal Database URL</strong>.
+                    </li>
+                    <li>
+                      Vào lại Web Service <strong>dce-shipbot</strong> &rarr; Mục <strong>Environment</strong> &rarr; Thêm biến môi trường:
+                      <div className="my-1.5 p-2 bg-slate-800 text-emerald-300 font-mono rounded text-[11px]">
+                        DATABASE_URL = (Dán Internal Database URL vào đây)
+                      </div>
+                    </li>
+                    <li>
+                      Bấm <strong>Save Changes</strong>. Render sẽ tự động lưu token và phiên chat vĩnh viễn!
+                    </li>
+                  </ol>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: UPDATE TOKEN */}
           {activeTab === 'update' && (
             <form onSubmit={handleUpdateToken} className="space-y-4 text-xs">
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 leading-relaxed">
@@ -431,7 +549,7 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
             </form>
           )}
 
-          {/* TAB 3: LOGS */}
+          {/* TAB 4: LOGS */}
           {activeTab === 'logs' && (
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between text-slate-500 pb-1">
@@ -454,7 +572,6 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
                     const isErr = log.type === 'error';
                     const isHook = log.type === 'incoming_webhook';
                     const isOut = log.type === 'outgoing_reply';
-                    const isRef = log.type === 'token_refresh';
 
                     return (
                       <div
@@ -488,42 +605,45 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
             </div>
           )}
 
-          {/* TAB 4: GUIDE */}
+          {/* TAB 5: GUIDE */}
           {activeTab === 'guide' && (
             <div className="space-y-3 text-xs text-slate-700 leading-relaxed">
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
                 <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <Database className="w-4 h-4 text-emerald-600" />
+                  1. Giải pháp triệt để: Gắn PostgreSQL miễn phí trên Render
+                </div>
+                <p className="text-slate-600">
+                  Đây là cách triệt để nhất để không bao giờ bị đứt chuỗi token. Render cung cấp 1 cơ sở dữ liệu PostgreSQL hoàn toàn miễn phí. Khi có PostgreSQL, token tự động cập nhật và duy trì liên tục vĩnh viễn.
+                </p>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                  <Zap className="w-4 h-4 text-blue-600" />
+                  2. Cơ chế Ủy Quyền 1-Click (OAuth Login URL)
+                </div>
+                <p className="text-slate-600">
+                  Tại Zalo Developers &rarr; Cài đặt &rarr; Official Account: Bạn thêm URL callback:
+                </p>
+                <div className="flex items-center gap-2 p-1.5 bg-slate-200 rounded font-mono text-[11px]">
+                  <span className="truncate">{window.location.origin}/api/zalo/oauth/callback</span>
+                  <button onClick={copyCallbackUrl} className="text-blue-600 hover:text-blue-800">
+                    {copiedCallback ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <p className="text-slate-600 mt-1">
+                  Mỗi khi cần cấp quyền, chỉ cần bấm link 1-Click, không cần mở API Explorer copy chuỗi token thủ công.
+                </p>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                <div className="font-bold text-slate-900 flex items-center gap-1.5">
                   <Terminal className="w-4 h-4 text-slate-700" />
-                  1. Cách xem Live Logs trên Render (Nơi bot chạy thực tế)
+                  3. Cơ chế tự động làm mới chủ động (Proactive Refresh)
                 </div>
                 <p className="text-slate-600">
-                  Vào trang <strong>dashboard.render.com</strong> &rarr; Chọn Web Service <strong>dce-shipbot</strong> &rarr; Click tab <strong>Logs</strong>.
-                </p>
-                <p className="text-slate-600">
-                  Tại đây sẽ hiển thị dòng: <code className="bg-slate-200 px-1 rounded">[Zalo OA] Incoming message...</code> hoặc <code className="bg-slate-200 px-1 rounded">[Zalo OA] Send response: &#123; error: -216... &#125;</code> để biết chính xác nguyên nhân lỗi.
-                </p>
-              </div>
-
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
-                <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                  <HelpCircle className="w-4 h-4 text-blue-600" />
-                  2. Cách dùng nút "Test Webhook" trên Zalo Developers
-                </div>
-                <p className="text-slate-600">
-                  Vào <strong>developers.zalo.me</strong> &rarr; <strong>Official Account</strong> &rarr; <strong>Webhook</strong> &rarr; Kéo xuống bảng sự kiện &rarr; Nhấn nút <strong>Test</strong> màu xanh tại dòng <code className="bg-slate-200 px-1 rounded">user_send_text</code>.
-                </p>
-                <p className="text-slate-600">
-                  Zalo sẽ gửi gói tin thử nghiệm và hiển thị mã <strong>200 OK</strong> kèm nội dung <code className="bg-slate-200 px-1 rounded">&#123; error: 0, message: "Received" &#125;</code>.
-                </p>
-              </div>
-
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
-                <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                  <Key className="w-4 h-4 text-amber-600" />
-                  3. Vì sao Access Token bị hết hạn sau 25 giờ?
-                </div>
-                <p className="text-slate-600">
-                  Đây là quy định bảo mật của Zalo (OAuth v4). Access Token chỉ tồn tại tối đa 25 giờ. ShipBot đã có cơ chế tự động gia hạn (Refresh Token), tuy nhiên nếu Refresh Token bị xoay vòng hoặc server Render khởi động lại sau 15 phút không hoạt động, bạn chỉ cần mở modal này và dán mã mới là bot hoạt động trở lại ngay lập tức.
+                  ShipBot được trang bị cơ chế tự động quét sau mỗi 18 tiếng (trước khi token chạm ngưỡng 25 tiếng) để tự động đổi lấy cặp token mới. Token luôn luôn mới và không bao giờ bị chết.
                 </p>
               </div>
             </div>
