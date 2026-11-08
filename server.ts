@@ -2859,11 +2859,14 @@ let lastTokenRefreshTimestamp = Date.now();
 let dbPool: pg.Pool | null = null;
 if (process.env.DATABASE_URL) {
   try {
+    const connStr = process.env.DATABASE_URL;
+    // Internal Render URL (e.g. dpg-xxx-a) runs in Render's internal private VPC where SSL certificate domain doesn't match
+    const isInternal = !connStr.includes('.render.com') && !connStr.includes('sslmode=require');
     dbPool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false },
+      connectionString: connStr,
+      ssl: isInternal ? false : { rejectUnauthorized: false },
     });
-    console.log('[Database] PostgreSQL connection pool initialized from DATABASE_URL.');
+    console.log(`[Database] PostgreSQL connection pool initialized from DATABASE_URL (SSL: ${isInternal ? 'off/internal VPC' : 'on'}).`);
   } catch (err: any) {
     console.warn('[Database] Failed to init PostgreSQL pool:', err?.message);
   }
