@@ -10,6 +10,7 @@ import { WaybillCard } from './components/WaybillCard';
 import { SamplePromptsModal } from './components/SamplePromptsModal';
 import { OrderHistoryModal } from './components/OrderHistoryModal';
 import { SuccessOrderModal } from './components/SuccessOrderModal';
+import { ZaloStatusModal } from './components/ZaloStatusModal';
 import { ChatMessage, ShippingInfo, OrderRecord } from './types';
 import {
   INITIAL_SHIPPING_INFO,
@@ -29,6 +30,8 @@ export default function App() {
   const [isSamplesOpen, setIsSamplesOpen] = useState<boolean>(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
   const [isSuccessOpen, setIsSuccessOpen] = useState<boolean>(false);
+  const [isZaloOpen, setIsZaloOpen] = useState<boolean>(false);
+  const [isZaloConnected, setIsZaloConnected] = useState<boolean | null>(null);
 
   // Saved orders from localStorage
   const [savedOrders, setSavedOrders] = useState<OrderRecord[]>(() => {
@@ -50,7 +53,7 @@ export default function App() {
     },
   ]);
 
-  // Check server health
+  // Check server health & Zalo status
   useEffect(() => {
     fetch('/api/health')
       .then((res) => res.json())
@@ -59,6 +62,15 @@ export default function App() {
       })
       .catch((err) => {
         console.warn('Could not contact /api/health:', err);
+      });
+
+    fetch('/api/zalo/status')
+      .then((res) => res.json())
+      .then((data) => {
+        setIsZaloConnected(data.connected);
+      })
+      .catch(() => {
+        setIsZaloConnected(false);
       });
   }, []);
 
@@ -219,6 +231,8 @@ export default function App() {
         onOpenSamples={() => setIsSamplesOpen(true)}
         onOpenHistory={() => setIsHistoryOpen(true)}
         savedOrdersCount={savedOrders.length}
+        onOpenZaloStatus={() => setIsZaloOpen(true)}
+        isZaloConnected={isZaloConnected}
       />
 
       {/* Main App Workspace */}
@@ -270,6 +284,12 @@ export default function App() {
         shippingInfo={shippingInfo}
         trackingCode={trackingCode}
         onNewOrder={handleReset}
+      />
+
+      <ZaloStatusModal
+        isOpen={isZaloOpen}
+        onClose={() => setIsZaloOpen(false)}
+        onStatusUpdate={(connected) => setIsZaloConnected(connected)}
       />
     </div>
   );

@@ -2329,7 +2329,11 @@ async function processChatPipeline(
 }> {
 
   if (!rawMessage || typeof rawMessage !== 'string') {
-    return res.status(400).json({ error: 'Message is required' });
+    return {
+      reply: 'Dạ em chào anh/chị ạ! Bên em chuyên dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi toàn quốc. Anh/chị vui lòng gửi em xin thông tin địa chỉ lấy và giao hàng nhé!',
+      shippingInfo: currentInfo || {},
+      quickReplies: [],
+    };
   }
 
   // Auto-expand any Google Maps short links if present
@@ -2364,6 +2368,15 @@ async function processChatPipeline(
     return {
       reply: ORDER_CONFIRMATION_CLOSING_PHRASE,
       shippingInfo: confirmedInfo,
+      quickReplies: [],
+    };
+  }
+
+  // Graceful fallback: Khách nhắn "Ok", "Đúng rồi", "Chuẩn rồi" nhưng phiên chat bị gián đoạn/reset
+  if (isConfirm && !isCorrection && (!currentInfo?.pickup?.address || !currentInfo?.receiver?.address)) {
+    return {
+      reply: 'Dạ em ghi nhận xác nhận của anh/chị rồi ạ! Anh/chị đợi chút em kiểm tra và báo giá cho mình ngay nhé.',
+      shippingInfo: currentInfo || {},
       quickReplies: [],
     };
   }
@@ -2712,7 +2725,7 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       }
     }
 
-    const mergedInfo = {
+    const mergedInfo: any = {
       sender: mergedSender,
       receiver: mergedReceiver,
       cargo: mergedCargo,
@@ -2780,7 +2793,8 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
   } catch (error: any) {
     console.warn('Gemini request failed or timed out, using fast smart extractor:', error?.message);
 
-    const { _invalidSenderPhone, _invalidReceiverPhone, ...cleanFast } = fastExtracted;
+    const { _invalidSenderPhone, _invalidReceiverPhone, ...cleanFastRaw } = fastExtracted;
+    const cleanFast: any = { ...cleanFastRaw };
     if (cleanFast.deliveryTime && /^(?:gấp|cần\s*gấp|gửi\s*gấp|hàng\s*gấp|rất\s*gấp|đi\s*gấp|lấy\s*gấp|giao\s*gấp)$/i.test(cleanFast.deliveryTime.trim())) {
       cleanFast.deliveryTime = '';
     }
@@ -2788,10 +2802,10 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
     let reply = '';
 
     if ((isFormPreviouslySent || currentInfo?.isComplete) && isConfirm && !isCorrection) {
-      const code = cleanShippingInfo?.trackingCode || currentInfo?.trackingCode || generateTrackingCode();
-      cleanShippingInfo.trackingCode = code;
-      cleanShippingInfo.isComplete = true;
-      cleanShippingInfo.isConfirmed = true;
+      const code = cleanFast?.trackingCode || currentInfo?.trackingCode || generateTrackingCode();
+      cleanFast.trackingCode = code;
+      cleanFast.isComplete = true;
+      cleanFast.isConfirmed = true;
       reply = ORDER_CONFIRMATION_CLOSING_PHRASE;
     } else if (evalResult.isComplete) {
       reply = formatOrderConfirmationForm(cleanFast);
@@ -2833,9 +2847,31 @@ app.post('/api/chat', async (req: Request, res: Response) => {
 
 // --- ZALO OA INTEGRATION WITH SESSION MEMORY & AUTO-REFRESH ---
 const TOKEN_CACHE_FILE = path.resolve(__dirname, '.zalo_token.json');
+const SESSIONS_CACHE_FILE = path.resolve(__dirname, '.zalo_sessions.json');
 
 let currentZaloAccessToken = process.env.ZALO_OA_ACCESS_TOKEN || '';
 let currentZaloRefreshToken = process.env.ZALO_REFRESH_TOKEN || '';
+
+// In-memory ring buffer for recent Zalo events (for live debugging & UI monitor)
+interface ZaloLogEntry {
+  timestamp: string;
+  type: 'incoming_webhook' | 'outgoing_reply' | 'token_refresh' | 'token_update' | 'error';
+  summary: string;
+  details?: any;
+}
+const zaloLogHistory: ZaloLogEntry[] = [];
+
+function logZaloEvent(type: ZaloLogEntry['type'], summary: string, details?: any) {
+  const entry: ZaloLogEntry = {
+    timestamp: new Date().toISOString(),
+    type,
+    summary,
+    details,
+  };
+  zaloLogHistory.unshift(entry);
+  if (zaloLogHistory.length > 50) zaloLogHistory.pop();
+  console.log(`[Zalo OA Event] [${type}] ${summary}`);
+}
 
 // Load cached token from disk if exists
 try {
@@ -2858,17 +2894,70 @@ function saveTokenCache(accessToken: string, refreshToken?: string) {
   }
 }
 
+// In-memory conversation state per Zalo User (Preserves full shippingInfo & history)
+interface ZaloUserSession {
+  history: Array<{ role: 'user' | 'model'; content: string }>;
+  currentInfo: any;
+  lastActive: number;
+}
+const zaloUserSessions = new Map<string, ZaloUserSession>();
+
+function loadSessionsCache() {
+  try {
+    if (fs.existsSync(SESSIONS_CACHE_FILE)) {
+      const obj = JSON.parse(fs.readFileSync(SESSIONS_CACHE_FILE, 'utf-8'));
+      for (const [k, v] of Object.entries(obj)) {
+        zaloUserSessions.set(k, v as ZaloUserSession);
+      }
+      console.log(`[Zalo OA] Loaded ${zaloUserSessions.size} active sessions from disk.`);
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+function saveSessionsCache() {
+  try {
+    const obj: Record<string, any> = {};
+    for (const [k, v] of zaloUserSessions.entries()) {
+      obj[k] = v;
+    }
+    fs.writeFileSync(SESSIONS_CACHE_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+  } catch (e) {
+    // ignore
+  }
+}
+
+// Initialize sessions from cache
+loadSessionsCache();
+
+// Cleanup stale sessions older than 24 hours periodically
+setInterval(() => {
+  const now = Date.now();
+  let changed = false;
+  for (const [uid, sess] of zaloUserSessions.entries()) {
+    if (now - sess.lastActive > 24 * 60 * 60 * 1000) {
+      zaloUserSessions.delete(uid);
+      changed = true;
+    }
+  }
+  if (changed) saveSessionsCache();
+}, 60 * 60 * 1000);
+
 async function refreshZaloAccessToken(): Promise<string | null> {
   const appId = process.env.ZALO_APP_ID || '4541345519906352744';
   const secretKey = process.env.ZALO_APP_SECRET || '';
   const refreshToken = currentZaloRefreshToken || process.env.ZALO_REFRESH_TOKEN || '';
 
   if (!appId || !secretKey || !refreshToken) {
-    console.warn('[Zalo OA] Missing credentials to auto-refresh token (ZALO_APP_ID, ZALO_APP_SECRET, or ZALO_REFRESH_TOKEN)');
+    const msg = 'Thiếu thông tin xác thực để làm mới token (ZALO_APP_ID, ZALO_APP_SECRET, hoặc ZALO_REFRESH_TOKEN)';
+    logZaloEvent('error', msg);
+    console.warn(`[Zalo OA] ${msg}`);
     return null;
   }
 
   try {
+    logZaloEvent('token_refresh', 'Đang gửi yêu cầu làm mới Access Token tới Zalo OAuth v4...');
     const bodyParams = new URLSearchParams({
       refresh_token: refreshToken,
       app_id: appId,
@@ -2891,13 +2980,19 @@ async function refreshZaloAccessToken(): Promise<string | null> {
         currentZaloRefreshToken = data.refresh_token;
       }
       saveTokenCache(currentZaloAccessToken, currentZaloRefreshToken);
-      console.log('[Zalo OA] Successfully auto-refreshed access token!');
+      logZaloEvent('token_refresh', 'Làm mới Access Token thành công!', {
+        expires_in: data.expires_in,
+      });
       return currentZaloAccessToken;
     } else {
+      const errMsg = `Thất bại khi làm mới token: ${data?.error} - ${data?.error_description || data?.message || JSON.stringify(data)}`;
+      logZaloEvent('error', errMsg, data);
       console.error('[Zalo OA] Failed to refresh token:', data);
       return null;
     }
   } catch (err: any) {
+    const netErr = `Lỗi mạng khi gọi Zalo OAuth: ${err?.message}`;
+    logZaloEvent('error', netErr);
     console.error('[Zalo OA] Refresh token network error:', err?.message);
     return null;
   }
@@ -2906,7 +3001,9 @@ async function refreshZaloAccessToken(): Promise<string | null> {
 async function sendZaloOAReply(userId: string, replyText: string): Promise<boolean> {
   const token = currentZaloAccessToken || process.env.ZALO_OA_ACCESS_TOKEN || '';
   if (!token) {
-    console.warn('[Zalo OA] ZALO_OA_ACCESS_TOKEN is missing');
+    const msg = 'ZALO_OA_ACCESS_TOKEN bị trống, không thể gửi tin nhắn';
+    logZaloEvent('error', msg);
+    console.warn(`[Zalo OA] ${msg}`);
     return false;
   }
 
@@ -2931,7 +3028,7 @@ async function sendZaloOAReply(userId: string, replyText: string): Promise<boole
 
     // If token expired (error code -216 or token expired message), attempt auto-refresh and retry once
     if (data?.error === -216 || data?.error === -204 || data?.error === -205 || (typeof data?.message === 'string' && data.message.toLowerCase().includes('token'))) {
-      console.warn('[Zalo OA] Access token seems expired. Attempting auto-refresh...');
+      logZaloEvent('token_refresh', 'Access Token hết hạn (-216), hệ thống đang thử tự động làm mới...');
       const newToken = await refreshZaloAccessToken();
       if (newToken) {
         res = await callZaloApi(newToken);
@@ -2940,8 +3037,18 @@ async function sendZaloOAReply(userId: string, replyText: string): Promise<boole
       }
     }
 
-    return data?.error === 0;
-  } catch (err) {
+    if (data?.error === 0) {
+      logZaloEvent('outgoing_reply', `Đã gửi trả lời tới user ${userId}`, {
+        text: replyText.slice(0, 120),
+        zaloMsgId: data?.data?.message_id,
+      });
+      return true;
+    } else {
+      logZaloEvent('error', `Lỗi khi gửi tin tới Zalo: Mã ${data?.error} - ${data?.message}`, data);
+      return false;
+    }
+  } catch (err: any) {
+    logZaloEvent('error', `Ngoại lệ khi gửi tin Zalo: ${err?.message}`);
     console.error('[Zalo OA] Error sending message:', err);
     return false;
   }
@@ -2958,23 +3065,147 @@ app.post('/api/zalo/send-order-bill', async (req: Request, res: Response) => {
   return res.json({ success, message: summaryText });
 });
 
-// In-memory conversation state per Zalo User (Preserves full shippingInfo & history)
-interface ZaloUserSession {
-  history: Array<{ role: 'user' | 'model'; content: string }>;
-  currentInfo: any;
-  lastActive: number;
-}
-const zaloUserSessions = new Map<string, ZaloUserSession>();
+// Diagnostic API: Kiểm tra trạng thái kết nối Zalo OA, Token & Logs
+app.get('/api/zalo/status', async (_req: Request, res: Response) => {
+  const token = currentZaloAccessToken || process.env.ZALO_OA_ACCESS_TOKEN || '';
+  const refreshToken = currentZaloRefreshToken || process.env.ZALO_REFRESH_TOKEN || '';
+  const appId = process.env.ZALO_APP_ID || '4541345519906352744';
+  const hasSecret = Boolean(process.env.ZALO_APP_SECRET);
 
-// Cleanup stale sessions older than 24 hours periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [uid, sess] of zaloUserSessions.entries()) {
-    if (now - sess.lastActive > 24 * 60 * 60 * 1000) {
-      zaloUserSessions.delete(uid);
+  let tokenValid = false;
+  let zaloError: any = null;
+  let zaloMessage = '';
+
+  if (!token) {
+    zaloMessage = 'Chưa cấu hình ZALO_OA_ACCESS_TOKEN';
+  } else {
+    try {
+      const testRes = await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'access_token': token,
+        },
+        body: JSON.stringify({
+          recipient: { user_id: 'test_health_check_user' },
+          message: { text: 'ping' },
+        }),
+      });
+      const testData = await testRes.json();
+      zaloError = testData?.error;
+      zaloMessage = testData?.message || '';
+
+      // -213 (User not found) or -201 (Invalid user) means Token IS VALID and accepted by Zalo!
+      if (testData?.error === 0 || testData?.error === -213 || testData?.error === -201) {
+        tokenValid = true;
+        zaloMessage = 'Access Token hợp lệ và đang hoạt động bình thường';
+      } else if (testData?.error === -216) {
+        tokenValid = false;
+        zaloMessage = 'Access Token đã hết hạn (-216: Access token is invalid)';
+      } else if (testData?.error === -209) {
+        tokenValid = false;
+        zaloMessage = 'Ứng dụng chưa được duyệt hoặc thiếu quyền (-209: App has not been approved)';
+      } else {
+        tokenValid = false;
+        zaloMessage = `Zalo trả về: [${testData?.error}] ${testData?.message}`;
+      }
+    } catch (err: any) {
+      zaloMessage = `Không thể kết nối API Zalo: ${err?.message}`;
     }
   }
-}, 60 * 60 * 1000);
+
+  res.json({
+    connected: tokenValid,
+    tokenValid,
+    zaloError,
+    zaloMessage,
+    config: {
+      appId,
+      hasAppSecret: hasSecret,
+      hasAccessToken: Boolean(token),
+      hasRefreshToken: Boolean(refreshToken),
+      accessTokenMasked: token ? `${token.slice(0, 6)}...${token.slice(-4)}` : null,
+      refreshTokenMasked: refreshToken ? `${refreshToken.slice(0, 6)}...${refreshToken.slice(-4)}` : null,
+    },
+    stats: {
+      activeSessions: zaloUserSessions.size,
+      serverTime: new Date().toISOString(),
+      uptimeSeconds: Math.floor(process.uptime()),
+    },
+    logs: zaloLogHistory.slice(0, 20),
+  });
+});
+
+// Diagnostic API: Cập nhật Access Token / Refresh Token trực tiếp từ UI mà không cần redeploy
+app.post('/api/zalo/update-token', async (req: Request, res: Response) => {
+  const { accessToken, refreshToken } = req.body || {};
+  if (!accessToken && !refreshToken) {
+    return res.status(400).json({ error: 'Cần cung cấp accessToken hoặc refreshToken' });
+  }
+
+  if (accessToken && typeof accessToken === 'string') {
+    currentZaloAccessToken = accessToken.trim();
+  }
+  if (refreshToken && typeof refreshToken === 'string') {
+    currentZaloRefreshToken = refreshToken.trim();
+  }
+
+  saveTokenCache(currentZaloAccessToken, currentZaloRefreshToken);
+  logZaloEvent('token_update', 'Đã cập nhật Token từ Web UI / API Endpoint', {
+    hasAccess: Boolean(accessToken),
+    hasRefresh: Boolean(refreshToken),
+  });
+
+  // Test new access token immediately
+  let testResult: any = null;
+  try {
+    const testRes = await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'access_token': currentZaloAccessToken,
+      },
+      body: JSON.stringify({
+        recipient: { user_id: 'test_health_check_user' },
+        message: { text: 'ping' },
+      }),
+    });
+    testResult = await testRes.json();
+  } catch (e: any) {
+    testResult = { error: -1, message: e?.message };
+  }
+
+  const isValid = testResult?.error === 0 || testResult?.error === -213 || testResult?.error === -201;
+
+  return res.json({
+    success: true,
+    tokenValid: isValid,
+    testResult,
+    message: isValid
+      ? 'Đã lưu và kích hoạt token thành công! Bot đã sẵn sàng nhận tin nhắn.'
+      : `Đã lưu token, nhưng Zalo phản hồi lỗi: [${testResult?.error}] ${testResult?.message}`,
+  });
+});
+
+// Diagnostic API: Bấm nút ép thử làm mới token ngay lập tức
+app.post('/api/zalo/refresh-now', async (_req: Request, res: Response) => {
+  logZaloEvent('token_refresh', 'Thực hiện yêu cầu thử làm mới token từ Web UI...');
+  const newToken = await refreshZaloAccessToken();
+  if (newToken) {
+    return res.json({
+      success: true,
+      message: 'Làm mới token thành công!',
+      accessTokenMasked: `${newToken.slice(0, 6)}...${newToken.slice(-4)}`,
+    });
+  } else {
+    const lastErr = zaloLogHistory.find((l) => l.type === 'error');
+    return res.status(400).json({
+      success: false,
+      message: 'Làm mới token thất bại. Có thể Refresh Token đã hết hạn (90 ngày) hoặc đã được sử dụng trước đó.',
+      details: lastErr?.details || null,
+    });
+  }
+});
 
 // Zalo Webhook verification (GET)
 app.get('/api/zalo/webhook', (_req: Request, res: Response) => {
@@ -2991,6 +3222,12 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
   res.status(200).json({ error: 0, message: 'Received' });
 
   if (event_name === 'user_send_text' && userId && userText) {
+    logZaloEvent('incoming_webhook', `Khách hàng ${userId} nhắn: "${userText}"`, {
+      event_name,
+      userId,
+      userText,
+      msgId: message?.msg_id,
+    });
     console.log(`[Zalo OA] Incoming message from user ${userId}: ${userText}`);
     try {
       const isResetOrder = /^(?:tạo\s*đơn\s*mới|đơn\s*mới|hủy\s*đơn|làm\s*lại|reset)\b/i.test(userText.trim());
@@ -3010,6 +3247,7 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
         const resetReply = 'Dạ em đã tạo phiên đơn mới rồi ạ. Bên em chuyên dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Anh/chị cho em xin thông tin địa chỉ lấy và giao hàng nhé!';
         session.history.push({ role: 'user', content: userText });
         session.history.push({ role: 'model', content: resetReply });
+        saveSessionsCache();
         await sendZaloOAReply(userId, resetReply);
         return;
       }
@@ -3028,12 +3266,20 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
         session.history = session.history.slice(-10);
       }
 
+      saveSessionsCache();
       await sendZaloOAReply(userId, result.reply);
     } catch (err: any) {
+      logZaloEvent('error', `Lỗi xử lý tin nhắn của user ${userId}: ${err?.message}`);
       console.error('[Zalo OA] Error processing chat reply:', err?.message);
     }
   }
 });
+
+// Render Keepalive to prevent free tier idle spin-down
+const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || 'https://dce-shipbot.onrender.com';
+setInterval(() => {
+  fetch(`${RENDER_EXTERNAL_URL}/api/zalo/webhook`).catch(() => {});
+}, 10 * 60 * 1000);
 
 // Setup Vite middleware in dev or static files in production
 async function startServer() {
