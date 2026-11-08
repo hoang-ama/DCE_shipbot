@@ -115,7 +115,7 @@ export const VN_DISTRICTS: DistrictCenter[] = [
   // Quảng Ninh
   { name: 'Thành phố Hạ Long', province: 'Quảng Ninh', centerWard: 'Phường Hồng Gai', aliases: ['hạ long', 'ha long', 'bãi cháy', 'bai chay', 'hòn gai', 'hon gai', 'hồng gai', 'tuần châu', 'cao xanh', 'cao thắng', 'hà lầm', 'hà khẩu', 'giếng đáy', 'hùng thắng'] },
   { name: 'Thành phố Cẩm Phả', province: 'Quảng Ninh', centerWard: 'Phường Cẩm Trung', aliases: ['cẩm phả', 'cam pha', 'cửa ông', 'cẩm trung', 'cẩm thịnh'] },
-  { name: 'Thành phố Uông Bí', province: 'Quảng Ninh', centerWard: 'Phường Quang Trung', aliases: ['uông bí', 'uong bi', 'yên tử', 'quang trung'] },
+  { name: 'Thành phố Uông Bí', province: 'Quảng Ninh', centerWard: 'Phường Quang Trung', aliases: ['uông bí', 'uong bi', 'yên tử', 'tp uông bí'] },
   { name: 'Thành phố Móng Cái', province: 'Quảng Ninh', centerWard: 'Phường Trần Phú', aliases: ['móng cái', 'mong cai', 'trà cổ', 'ka long'] },
   { name: 'Thị xã Quảng Yên', province: 'Quảng Ninh', centerWard: 'Phường Quảng Yên', aliases: ['quảng yên', 'quang yen'] },
   { name: 'Thị xã Đông Triều', province: 'Quảng Ninh', centerWard: 'Phường Đông Triều', aliases: ['đông triều', 'dong trieu', 'mạo khê'] },
@@ -125,7 +125,7 @@ export const VN_DISTRICTS: DistrictCenter[] = [
   { name: 'Quận Cầu Giấy', province: 'Hà Nội', centerWard: 'Phường Quan Hoa', aliases: ['cầu giấy', 'cau giay', 'cg', 'dịch vọng', 'dịch vọng hậu', 'nghĩa tân', 'nghĩa đô', 'mai dịch', 'trung hòa', 'yên hòa'] },
   { name: 'Quận Hoàn Kiếm', province: 'Hà Nội', centerWard: 'Phường Hàng Trống', aliases: ['hoàn kiếm', 'hoan kiem', 'hk', 'hàng bạc', 'hàng bài', 'hàng bông', 'hàng gai', 'tràng tiền', 'cửa nam', 'phố cổ'] },
   { name: 'Quận Ba Đình', province: 'Hà Nội', centerWard: 'Phường Kim Mã', aliases: ['ba đình', 'ba dinh', 'liễu giai', 'cống vị', 'ngọc hà', 'giảng võ', 'kim mã', 'đội cấn'] },
-  { name: 'Quận Đống Đa', province: 'Hà Nội', centerWard: 'Phường Ô Chợ Dừa', aliases: ['đống đa', 'dong da', 'láng thượng', 'láng hạ', 'quang trung', 'nam đồng', 'ô chợ dừa', 'chùa láng', 'xã đàn', 'thái hà'] },
+  { name: 'Quận Đống Đa', province: 'Hà Nội', centerWard: 'Phường Ô Chợ Dừa', aliases: ['đống đa', 'dong da', 'láng thượng', 'láng hạ', 'nam đồng', 'ô chợ dừa', 'chùa láng', 'xã đàn', 'thái hà'] },
   { name: 'Quận Hai Bà Trưng', province: 'Hà Nội', centerWard: 'Phường Lê Đại Hành', aliases: ['hai bà trưng', 'hai ba trung', 'hbt', 'bách khoa', 'đồng tâm', 'bạch đằng', 'vĩnh tuy', 'phố huế', 'bạch mai'] },
   { name: 'Quận Thanh Xuân', province: 'Hà Nội', centerWard: 'Phường Thanh Xuân Bắc', aliases: ['thanh xuân', 'thanh xuan', 'tx', 'thượng đình', 'nhân chính', 'khương trung', 'khương đình', 'khương mai', 'nguyễn trãi', 'khuất duy tiến'] },
   { name: 'Quận Tây Hồ', province: 'Hà Nội', centerWard: 'Phường Xuân La', aliases: ['tây hồ', 'tay ho', 'xuân la', 'phú thượng', 'quảng an', 'nhật tân', 'võ chí công', 'lạc long quân'] },
@@ -213,7 +213,8 @@ export const VN_DISTRICTS: DistrictCenter[] = [
   { name: 'Thành phố Nam Định', province: 'Nam Định', centerWard: 'Phường Vị Hoàng', aliases: ['nam định', 'nam dinh', 'tp nam định'] },
   { name: 'Thành phố Thái Bình', province: 'Thái Bình', centerWard: 'Phường Lê Hồng Phong', aliases: ['thái bình', 'thai binh', 'tp thái bình'] },
   { name: 'Thành phố Phủ Lý', province: 'Hà Nam', centerWard: 'Phường Lương Khánh Thiện', aliases: ['phủ lý', 'phu ly', 'hà nam', 'ha nam'] },
-  { name: 'Thành phố Ninh Bình', province: 'Ninh Bình', centerWard: 'Phường Đông Thành', aliases: ['ninh bình', 'ninh binh', 'tp ninh bình', 'tràng an', 'bái đính'] },
+  { name: 'Thành phố Tam Điệp', province: 'Ninh Bình', centerWard: 'Phường Bắc Sơn', aliases: ['tam điệp', 'tam diep', 'tp tam điệp', 'bắc sơn', 'trung sơn', 'nam sơn'] },
+  { name: 'Thành phố Ninh Bình', province: 'Ninh Bình', centerWard: 'Phường Đông Thành', aliases: ['tp ninh bình', 'tp ninh binh', 'thành phố ninh bình', 'tràng an', 'bái đính'] },
 
   // Miền Trung & Miền Nam trọng điểm
   { name: 'Thành phố Huế', province: 'Thừa Thiên Huế', centerWard: 'Phường Phú Nhuận', aliases: ['huế', 'hue', 'tp huế'] },
@@ -423,15 +424,46 @@ export function resolveAdministrativeAddress(rawInput: string): {
     };
   }
 
+  // 1.5. If the input ALREADY contains an explicit ward, commune, or town,
+  // (e.g. "Phường Vạn Phúc, Quận Hà Đông", "Trường Mầm non Bắc Sơn, Phường Bắc Sơn, Thành phố Tam Điệp, Ninh Bình"),
+  // PRESERVE IT AS-IS! Never overwrite with a generic centerWard!
+  const hasExplicitWard =
+    /(?:phường|p\.|xã|x\.|thị trấn|tt\.)\s+[a-zà-ỹ0-9]+/i.test(clean) ||
+    /(?:phuong|p\.|xa|thi\s*tran)\s+[a-z0-9]+/i.test(unaccented);
+  if (hasExplicitWard) {
+    return {
+      fullAddress: clean,
+      hasWardCommune: true,
+    };
+  }
+
   // 2. Preserve house numbers or landmark prefixes (e.g. "Khu đô thị PG An Đồng", "Số 120", "P. 502 Keangnam")
   const numMatch =
     clean.match(/(?:số\s+|phòng\s+|căn\s+|tầng\s+)(\d+[a-zA-Z]?(?:\/\d+)*)\b/i) ||
     clean.match(/^(\d+[a-zA-Z]?(?:\/\d+)*)\s+/i);
   const prefixNum = numMatch ? `${numMatch[0].trim()} ` : '';
 
+  // Detect if clean already specifies a known province to avoid false cross-province matches (e.g. Hà Nội matching Uông Bí Quảng Ninh)
+  let matchedProvince: string | undefined = undefined;
+  for (const prov of VN_PROVINCES) {
+    for (const pAlias of prov.aliases) {
+      const pPattern = new RegExp(`\\b${pAlias}\\b`, 'i');
+      const pUnaccentedPattern = new RegExp(`\\b${removeVietnameseDiacritics(pAlias)}\\b`, 'i');
+      if (pPattern.test(clean) || pUnaccentedPattern.test(unaccented)) {
+        matchedProvince = prov.standardName;
+        break;
+      }
+    }
+    if (matchedProvince) break;
+  }
+
   // 3. Match against Vietnam District Directory & Administrative Centers
   for (const d of VN_DISTRICTS) {
-    for (const alias of d.aliases) {
+    if (matchedProvince && d.province !== matchedProvince) {
+      continue;
+    }
+    const sortedAliases = [...d.aliases].sort((a, b) => b.length - a.length);
+    for (const alias of sortedAliases) {
       const aliasUnaccented = removeVietnameseDiacritics(alias);
       const pattern = new RegExp(`\\b${alias}\\b`, 'i');
       const unaccentedPattern = new RegExp(`\\b${aliasUnaccented}\\b`, 'i');
@@ -439,8 +471,20 @@ export function resolveAdministrativeAddress(rawInput: string): {
       if (pattern.test(clean) || unaccentedPattern.test(unaccented)) {
         // Formulate standard address
         let base = `${d.name}, ${d.province}`;
-        if (d.centerWard) {
-          base = `Khu vực ${d.centerWard}, ${d.name}, ${d.province}`;
+        let matchedWard = d.centerWard;
+        // If alias specifically names a known ward in this district, use that ward rather than default centerWard
+        if (alias === 'vạn phúc' || alias === 'van phuc') matchedWard = 'Phường Vạn Phúc';
+        else if (alias === 'mộ lao' || alias === 'mo lao') matchedWard = 'Phường Mộ Lao';
+        else if (alias === 'dương nội' || alias === 'duong noi') matchedWard = 'Phường Dương Nội';
+        else if (alias === 'văn quán' || alias === 'van quan') matchedWard = 'Phường Văn Quán';
+        else if (alias === 'la khê' || alias === 'la khe') matchedWard = 'Phường La Khê';
+        else if (alias === 'yết kiêu' || alias === 'yet kieu') matchedWard = 'Phường Yết Kiêu';
+        else if (alias === 'mễ trì' || alias === 'me tri') matchedWard = 'Phường Mễ Trì';
+        else if (alias === 'mỹ đình' || alias === 'my dinh' || alias === 'mỹ đình 1' || alias === 'mỹ đình 2') matchedWard = 'Phường Mỹ Đình';
+        else if (alias === 'bắc sơn' || alias === 'bac son') matchedWard = 'Phường Bắc Sơn';
+
+        if (matchedWard) {
+          base = `Khu vực ${matchedWard}, ${d.name}, ${d.province}`;
         }
 
         // Special famous aliases handling
@@ -495,7 +539,7 @@ export function resolveAdministrativeAddress(rawInput: string): {
           hasWardCommune: true,
           province: d.province,
           district: d.name,
-          ward: d.centerWard,
+          ward: matchedWard || d.centerWard,
         };
       }
     }

@@ -1371,6 +1371,15 @@ export function reverseGeocodeAddress(raw: string | undefined | null): { address
     .replace(/\bhk\b/gi, 'Hoàn Kiếm');
   const normalizedUnaccented = removeVietnameseDiacritics(normalized);
 
+  // 0.5. If address ALREADY has an explicit ward or commune (e.g. "Phường Vạn Phúc", "Phường Bắc Sơn"),
+  // preserve it as-is! NEVER overwrite with generic centerWard!
+  const hasExplicitWard =
+    /(?:phường|p\.|xã|x\.|thị trấn|tt\.)\s+[a-zà-ỹ0-9]+/i.test(clean) ||
+    /(?:phuong|p\.|xa|thi\s*tran)\s+[a-z0-9]+/i.test(unaccented);
+  if (hasExplicitWard) {
+    return { address: clean, hasWardCommune: true };
+  }
+
   // 1. Check against full Vietnam Administrative units (63 provinces & all districts/wards)
   const adminRes = resolveAdministrativeAddress(clean);
   if (adminRes.hasWardCommune) {
