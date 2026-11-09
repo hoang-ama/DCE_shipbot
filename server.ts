@@ -3124,6 +3124,16 @@ async function initDatabaseAndRestore() {
       if (row.refresh_token) currentZaloRefreshToken = row.refresh_token;
       if (row.updated_at) lastTokenRefreshTimestamp = new Date(row.updated_at).getTime();
       console.log('[Database] Successfully restored active Zalo tokens from PostgreSQL!');
+    } else if (currentZaloAccessToken || process.env.ZALO_OA_ACCESS_TOKEN) {
+      // First boot with new DB: Seed DB with the current active token!
+      const initialAccess = currentZaloAccessToken || process.env.ZALO_OA_ACCESS_TOKEN || '';
+      const initialRefresh = currentZaloRefreshToken || process.env.ZALO_REFRESH_TOKEN || '';
+      await dbPool.query(`
+        INSERT INTO zalo_auth (id, access_token, refresh_token, updated_at)
+        VALUES ('default', $1, $2, NOW())
+        ON CONFLICT (id) DO NOTHING;
+      `, [initialAccess, initialRefresh]);
+      console.log('[Database] Seeded initial Zalo tokens into PostgreSQL from environment.');
     }
 
     // 2. Restore active sessions from PostgreSQL
@@ -3850,6 +3860,59 @@ app.put('/api/crm/customers/:userId', async (req: Request, res: Response) => {
   }
 
   return res.json({ success: true, customer });
+});
+
+// GET /api/db/overview - Xem cấu trúc và dữ liệu các bảng trong Database trực tiếp qua Web
+app.get('/api/db/overview', async (_req: Request, res: Response) => {
+  if (!dbPool) {
+    return res.json({
+      connected: false,
+      message: 'Chưa cấu hình DATABASE_URL (Chưa kết nối PostgreSQL)',
+      inMemoryStats: {
+        customersCount: inMemoryCustomers.size,
+        messagesCount: inMemoryMessages.length,
+        sessionsCount: zaloUserSessions.size,
+      },
+    });
+  }
+
+  try {
+    const [authRes, custRes, msgRes, sessRes] = await Promise.all([
+      dbPool.query(`SELECT id, SUBSTRING(access_token FROM 1 FOR 10) || '...' as access_token_masked, SUBSTRING(refresh_token FROM 1 FOR 10) || '...' as refresh_token_masked, updated_at FROM zalo_auth`),
+      dbPool.query(`SELECT COUNT(*) as count FROM crm_customers`),
+      dbPool.query(`SELECT COUNT(*) as count FROM crm_messages`),
+      dbPool.query(`SELECT COUNT(*) as count FROM zalo_sessions`),
+    ]);
+
+    const recentCustomers = await dbPool.query(`SELECT user_id, name, phone, last_interaction, last_message FROM crm_customers ORDER BY last_interaction DESC LIMIT 10`);
+
+    return res.json({
+      connected: true,
+      databaseType: 'Render PostgreSQL',
+      tables: {
+        zalo_auth: {
+          description: 'Lưu trữ Access Token và Refresh Token Zalo OA vĩnh viễn',
+          rowCount: authRes.rowCount,
+          records: authRes.rows,
+        },
+        crm_customers: {
+          description: 'Hồ sơ danh bạ khách hàng Zalo',
+          totalCount: parseInt(custRes.rows[0]?.count || '0', 10),
+          recentRecords: recentCustomers.rows,
+        },
+        crm_messages: {
+          description: 'Toàn bộ lịch sử tin nhắn 2 chiều giữa khách và bot',
+          totalCount: parseInt(msgRes.rows[0]?.count || '0', 10),
+        },
+        zalo_sessions: {
+          description: 'Bộ nhớ ngữ cảnh phiên hội thoại (chống mất ngữ cảnh khi restart)',
+          totalCount: parseInt(sessRes.rows[0]?.count || '0', 10),
+        },
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message });
+  }
 });
 
 // Render Keepalive to prevent free tier idle spin-down
