@@ -41,9 +41,14 @@ export const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
               <History className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base">Lịch Sử Đơn Vận Chuyển</h3>
+              <h3 className="font-bold text-base flex items-center gap-2">
+                <span>Lịch Sử Đơn Vận Chuyển</span>
+                <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                  shipbot-db (PostgreSQL)
+                </span>
+              </h3>
               <p className="text-xs text-slate-300">
-                {orders.length} đơn hàng đã lưu trên trình duyệt của bạn
+                {orders.length} đơn hàng đã lưu và đồng bộ trong cơ sở dữ liệu
               </p>
             </div>
           </div>
@@ -84,13 +89,25 @@ export const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
                 className="p-4 bg-white rounded-xl border border-slate-200 shadow-2xs hover:border-blue-300 transition-all"
               >
                 <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100 mb-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-mono font-bold text-xs text-blue-600">
                       {order.trackingCode}
                     </span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
                       Đã tạo đơn
                     </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
+                      order.source === 'zalo'
+                        ? 'bg-cyan-50 text-cyan-700 border-cyan-200'
+                        : 'bg-blue-50 text-blue-700 border-blue-200'
+                    }`}>
+                      {order.source === 'zalo' ? 'Kênh Zalo OA' : 'Web App'}
+                    </span>
+                    {order.customerName && (
+                      <span className="text-[10px] text-slate-500 font-medium">
+                        • {order.customerName}
+                      </span>
+                    )}
                   </div>
                   <span className="text-[11px] text-slate-400">{order.createdAt}</span>
                 </div>

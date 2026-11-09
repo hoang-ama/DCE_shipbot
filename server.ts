@@ -3,6 +3,7 @@ import fs from 'fs';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 import pg from 'pg';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import { resolveAdministrativeAddress, parseGoogleMapsLocation } from './src/data/vnAdministrative';
@@ -13,6 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json());
@@ -2928,6 +2930,80 @@ export interface CrmMessage {
 const inMemoryCustomers = new Map<string, CrmCustomer>();
 const inMemoryMessages: CrmMessage[] = [];
 
+// Data structure for persisted shipping orders (Waybill history in PostgreSQL shipbot-db)
+export interface OrderRecordDB {
+  id: string;
+  trackingCode: string;
+  createdAt: string;
+  status: string;
+  customerName?: string;
+  customerPhone?: string;
+  source: 'web' | 'zalo';
+  shippingInfo: any;
+}
+
+const inMemoryOrders: OrderRecordDB[] = [];
+
+// Helper to save a shipping order into memory and PostgreSQL (shipbot-db)
+async function saveShippingOrder(orderData: {
+  id?: string;
+  trackingCode?: string;
+  status?: string;
+  customerName?: string;
+  customerPhone?: string;
+  source?: 'web' | 'zalo';
+  shippingInfo: any;
+}): Promise<OrderRecordDB> {
+  const id = orderData.id || `order-${Date.now()}`;
+  const trackingCode = orderData.trackingCode || generateTrackingCode();
+  const status = orderData.status || 'created';
+  const customerName = orderData.customerName || orderData.shippingInfo?.sender?.name || '';
+  const customerPhone = orderData.customerPhone || orderData.shippingInfo?.sender?.phone || '';
+  const source = orderData.source || 'web';
+  const shippingInfo = orderData.shippingInfo;
+  const createdAt = new Date().toLocaleString('vi-VN');
+
+  const record: OrderRecordDB = {
+    id,
+    trackingCode,
+    createdAt,
+    status,
+    customerName,
+    customerPhone,
+    source,
+    shippingInfo,
+  };
+
+  const existingIdx = inMemoryOrders.findIndex((o) => o.id === id || o.trackingCode === trackingCode);
+  if (existingIdx >= 0) {
+    inMemoryOrders[existingIdx] = record;
+  } else {
+    inMemoryOrders.unshift(record);
+  }
+
+  if (dbPool) {
+    try {
+      await dbPool.query(
+        `INSERT INTO shipping_orders (id, tracking_code, status, customer_name, customer_phone, source, shipping_info, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+         ON CONFLICT (id) DO UPDATE
+         SET tracking_code = EXCLUDED.tracking_code,
+             status = EXCLUDED.status,
+             customer_name = EXCLUDED.customer_name,
+             customer_phone = EXCLUDED.customer_phone,
+             source = EXCLUDED.source,
+             shipping_info = EXCLUDED.shipping_info;`,
+        [id, trackingCode, status, customerName, customerPhone, source, JSON.stringify(shippingInfo)]
+      );
+      console.log(`[Database] Saved shipping order ${trackingCode} (${source}) to PostgreSQL.`);
+    } catch (err: any) {
+      console.error('[Database] Failed to save shipping order to PostgreSQL:', err?.message);
+    }
+  }
+
+  return record;
+}
+
 // Fetch official Zalo user profile if available
 async function fetchZaloUserProfile(userId: string): Promise<{ display_name?: string; avatar?: string; phone?: string } | null> {
   const token = currentZaloAccessToken || process.env.ZALO_OA_ACCESS_TOKEN || '';
@@ -3011,6 +3087,19 @@ async function recordCrmInteraction(
       customer.shipping_info = shippingInfo;
       if (shippingInfo.isComplete || shippingInfo.isConfirmed) {
         customer.order_count = (customer.order_count || 0) + 1;
+        // Auto-save confirmed order from Zalo OA into PostgreSQL shipbot-db
+        const alreadySaved = inMemoryOrders.some((o) => o.id.includes(userId));
+        if (!alreadySaved) {
+          saveShippingOrder({
+            id: `zalo-ord-${userId}-${Date.now()}`,
+            trackingCode: generateTrackingCode(),
+            status: 'created',
+            customerName: customer.name,
+            customerPhone: customer.phone,
+            source: 'zalo',
+            shippingInfo,
+          }).catch(() => {});
+        }
       }
     }
   }
@@ -3111,10 +3200,21 @@ async function initDatabaseAndRestore() {
         shipping_info_snapshot JSONB,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS shipping_orders (
+        id VARCHAR(100) PRIMARY KEY,
+        tracking_code VARCHAR(50) NOT NULL UNIQUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        status VARCHAR(50) DEFAULT 'created',
+        customer_name VARCHAR(255),
+        customer_phone VARCHAR(50),
+        source VARCHAR(50) DEFAULT 'web',
+        shipping_info JSONB NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS idx_crm_messages_user_id ON crm_messages(user_id);
       CREATE INDEX IF NOT EXISTS idx_crm_customers_last_interaction ON crm_customers(last_interaction DESC);
+      CREATE INDEX IF NOT EXISTS idx_shipping_orders_created_at ON shipping_orders(created_at DESC);
     `);
-    console.log('[Database] PostgreSQL tables (auth, sessions, CRM) initialized successfully.');
+    console.log('[Database] PostgreSQL tables (auth, sessions, CRM, shipping_orders) initialized successfully.');
 
     // 1. Restore tokens from PostgreSQL
     const tokenRes = await dbPool.query(`SELECT access_token, refresh_token, updated_at FROM zalo_auth WHERE id = 'default' LIMIT 1`);
@@ -3180,6 +3280,25 @@ async function initDatabaseAndRestore() {
     }
     if (msgRes.rows.length > 0) {
       console.log(`[Database] Successfully restored ${msgRes.rows.length} CRM messages from PostgreSQL!`);
+    }
+
+    // 5. Restore Shipping Orders from PostgreSQL
+    const ordRes = await dbPool.query(`SELECT * FROM shipping_orders ORDER BY created_at DESC LIMIT 100`);
+    inMemoryOrders.length = 0;
+    for (const r of ordRes.rows) {
+      inMemoryOrders.push({
+        id: r.id,
+        trackingCode: r.tracking_code,
+        createdAt: r.created_at ? new Date(r.created_at).toLocaleString('vi-VN') : new Date().toLocaleString('vi-VN'),
+        status: r.status || 'created',
+        customerName: r.customer_name || '',
+        customerPhone: r.customer_phone || '',
+        source: (r.source as 'web' | 'zalo') || 'web',
+        shippingInfo: r.shipping_info,
+      });
+    }
+    if (ordRes.rows.length > 0) {
+      console.log(`[Database] Successfully restored ${ordRes.rows.length} shipping orders from PostgreSQL!`);
     }
   } catch (e: any) {
     console.error('[Database] Failed to init or restore from PostgreSQL:', e?.message);
@@ -3422,17 +3541,47 @@ setInterval(async () => {
   }
 }, 30 * 60 * 1000);
 
+// OAuth state cache for PKCE
+const oauthStateMap = new Map<string, { codeVerifier: string; createdAt: number }>();
+
+function generatePKCE() {
+  const codeVerifier = crypto.randomBytes(32).toString('base64url'); // 43 url-safe chars
+  const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+  return { codeVerifier, codeChallenge };
+}
+
+// Helper to determine exact OAuth redirect URI (ensures HTTPS on Render and production domains)
+function getOAuthRedirectUri(req: Request): string {
+  const forwardedHost = req.get('x-forwarded-host');
+  const host = forwardedHost || req.get('host') || 'dce-shipbot.onrender.com';
+  // Use http ONLY if running on localhost or 127.0.0.1
+  const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+  const proto = isLocal ? 'http' : 'https';
+  return `${proto}://${host}/api/zalo/oauth/callback`;
+}
+
 // API Route: 1-Click Zalo OA Authorization Login (Redirects to official Zalo permission screen)
 app.get('/api/zalo/oauth/login', (req: Request, res: Response) => {
   const appId = process.env.ZALO_APP_ID || '4541345519906352744';
-  const redirectUri = `${req.protocol}://${req.get('host')}/api/zalo/oauth/callback`;
-  const zaloAuthUrl = `https://oauth.zalo.me/v4/oa/permission?app_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  const redirectUri = getOAuthRedirectUri(req);
+  const state = crypto.randomBytes(16).toString('hex');
+  const { codeVerifier, codeChallenge } = generatePKCE();
+
+  oauthStateMap.set(state, { codeVerifier, createdAt: Date.now() });
+
+  // Clean old entries (> 15 min)
+  const now = Date.now();
+  for (const [s, val] of oauthStateMap.entries()) {
+    if (now - val.createdAt > 15 * 60 * 1000) oauthStateMap.delete(s);
+  }
+
+  const zaloAuthUrl = `https://oauth.zalo.me/v4/oa/permission?app_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&code_challenge=${codeChallenge}&state=${state}`;
   res.redirect(zaloAuthUrl);
 });
 
 // API Route: Zalo OAuth Callback handler (Auto-exchanges authorization code for Access & Refresh tokens)
 app.get('/api/zalo/oauth/callback', async (req: Request, res: Response) => {
-  const { code, oa_id } = req.query;
+  const { code, oa_id, state } = req.query;
   const appId = process.env.ZALO_APP_ID || '4541345519906352744';
   const secretKey = process.env.ZALO_APP_SECRET || '';
 
@@ -3450,12 +3599,24 @@ app.get('/api/zalo/oauth/callback', async (req: Request, res: Response) => {
     `);
   }
 
+  let codeVerifier: string | undefined;
+  if (state && typeof state === 'string') {
+    const cached = oauthStateMap.get(state);
+    if (cached) {
+      codeVerifier = cached.codeVerifier;
+      oauthStateMap.delete(state);
+    }
+  }
+
   try {
     const bodyParams = new URLSearchParams({
       code,
       app_id: appId,
       grant_type: 'authorization_code',
     });
+    if (codeVerifier) {
+      bodyParams.append('code_verifier', codeVerifier);
+    }
 
     const tokenRes = await fetch('https://oauth.zalo.me/v4/oa/access_token', {
       method: 'POST',
@@ -3491,7 +3652,7 @@ app.get('/api/zalo/oauth/callback', async (req: Request, res: Response) => {
               </div>
               <h2 style="color: #065f46; margin: 0 0 10px 0; font-size: 22px;">Kết Nối Zalo OA Thành Công!</h2>
               <p style="color: #64748b; font-size: 14px; line-height: 1.6; margin: 0 0 24px 0;">
-                ShipBot đã tự động lấy và kích hoạt <strong>Access Token</strong> mới. Token sẽ được hệ thống tự động gia hạn định kỳ.
+                ShipBot đã tự động lấy và kích hoạt <strong>Access Token</strong> mới, đồng thời lưu trữ vào Database PostgreSQL (shipbot-db). Token sẽ được hệ thống tự động gia hạn định kỳ vĩnh viễn.
               </p>
               <a href="/" style="display: inline-block; background: #2563eb; color: white; padding: 12px 28px; border-radius: 12px; text-decoration: none; font-weight: 600; font-size: 14px; box-shadow: 0 4px 12px rgba(37,99,235,0.2);">
                 Quay lại ShipBot
@@ -3568,7 +3729,7 @@ app.get('/api/zalo/status', async (req: Request, res: Response) => {
     }
   }
 
-  const callbackUrl = `${req.protocol}://${req.get('host')}/api/zalo/oauth/callback`;
+  const callbackUrl = getOAuthRedirectUri(req);
 
   res.json({
     connected: tokenValid,
@@ -3862,6 +4023,86 @@ app.put('/api/crm/customers/:userId', async (req: Request, res: Response) => {
   return res.json({ success: true, customer });
 });
 
+// --- SHIPPING ORDERS REST API ENDPOINTS (Lưu trữ và đồng bộ trong shipbot-db) ---
+
+// GET /api/orders - Lấy danh sách phiếu vận đơn đã lưu từ Database
+app.get('/api/orders', async (_req: Request, res: Response) => {
+  if (dbPool) {
+    try {
+      const result = await dbPool.query(`
+        SELECT id, tracking_code, created_at, status, customer_name, customer_phone, source, shipping_info
+        FROM shipping_orders
+        ORDER BY created_at DESC
+        LIMIT 100
+      `);
+      const orders = result.rows.map((r) => ({
+        id: r.id,
+        trackingCode: r.tracking_code,
+        createdAt: r.created_at ? new Date(r.created_at).toLocaleString('vi-VN') : '',
+        status: r.status,
+        customerName: r.customer_name,
+        customerPhone: r.customer_phone,
+        source: r.source,
+        shippingInfo: r.shipping_info,
+      }));
+      return res.json({ success: true, orders, source: 'postgresql' });
+    } catch (err: any) {
+      console.error('[API /api/orders] Error fetching orders from DB:', err?.message);
+    }
+  }
+  return res.json({ success: true, orders: inMemoryOrders, source: 'memory' });
+});
+
+// POST /api/orders - Tạo hoặc cập nhật phiếu vận đơn vào Database
+app.post('/api/orders', async (req: Request, res: Response) => {
+  try {
+    const { id, trackingCode, status, customerName, customerPhone, source, shippingInfo } = req.body;
+    if (!shippingInfo) {
+      return res.status(400).json({ error: 'shippingInfo is required' });
+    }
+    const saved = await saveShippingOrder({
+      id,
+      trackingCode,
+      status,
+      customerName,
+      customerPhone,
+      source: source || 'web',
+      shippingInfo,
+    });
+    return res.json({ success: true, order: saved });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message });
+  }
+});
+
+// DELETE /api/orders/:id - Xóa 1 phiếu vận đơn khỏi Database
+app.delete('/api/orders/:id', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const idx = inMemoryOrders.findIndex((o) => o.id === id);
+  if (idx >= 0) inMemoryOrders.splice(idx, 1);
+  if (dbPool) {
+    try {
+      await dbPool.query(`DELETE FROM shipping_orders WHERE id = $1`, [id]);
+    } catch (err: any) {
+      console.error('[API DELETE /api/orders/:id] Error:', err?.message);
+    }
+  }
+  return res.json({ success: true, deletedId: id });
+});
+
+// DELETE /api/orders - Xóa toàn bộ lịch sử đơn hàng
+app.delete('/api/orders', async (_req: Request, res: Response) => {
+  inMemoryOrders.length = 0;
+  if (dbPool) {
+    try {
+      await dbPool.query(`DELETE FROM shipping_orders`);
+    } catch (err: any) {
+      console.error('[API DELETE ALL /api/orders] Error:', err?.message);
+    }
+  }
+  return res.json({ success: true, message: 'All orders cleared' });
+});
+
 // GET /api/db/overview - Xem cấu trúc và dữ liệu các bảng trong Database trực tiếp qua Web
 app.get('/api/db/overview', async (_req: Request, res: Response) => {
   if (!dbPool) {
@@ -3872,28 +4113,44 @@ app.get('/api/db/overview', async (_req: Request, res: Response) => {
         customersCount: inMemoryCustomers.size,
         messagesCount: inMemoryMessages.length,
         sessionsCount: zaloUserSessions.size,
+        ordersCount: inMemoryOrders.length,
       },
     });
   }
 
   try {
-    const [authRes, custRes, msgRes, sessRes] = await Promise.all([
+    const [authRes, custRes, msgRes, sessRes, ordRes] = await Promise.all([
       dbPool.query(`SELECT id, SUBSTRING(access_token FROM 1 FOR 10) || '...' as access_token_masked, SUBSTRING(refresh_token FROM 1 FOR 10) || '...' as refresh_token_masked, updated_at FROM zalo_auth`),
       dbPool.query(`SELECT COUNT(*) as count FROM crm_customers`),
       dbPool.query(`SELECT COUNT(*) as count FROM crm_messages`),
       dbPool.query(`SELECT COUNT(*) as count FROM zalo_sessions`),
+      dbPool.query(`SELECT COUNT(*) as count FROM shipping_orders`),
     ]);
 
     const recentCustomers = await dbPool.query(`SELECT user_id, name, phone, last_interaction, last_message FROM crm_customers ORDER BY last_interaction DESC LIMIT 10`);
+    const recentOrders = await dbPool.query(`
+      SELECT id, tracking_code, source, status, created_at, customer_name, customer_phone,
+             shipping_info->'cargo'->>'name' as cargo_name,
+             shipping_info->'sender'->>'address' as sender_addr,
+             shipping_info->'receiver'->>'address' as receiver_addr
+      FROM shipping_orders
+      ORDER BY created_at DESC
+      LIMIT 10
+    `);
 
     return res.json({
       connected: true,
-      databaseType: 'Render PostgreSQL',
+      databaseType: 'Render PostgreSQL (shipbot-db)',
       tables: {
         zalo_auth: {
           description: 'Lưu trữ Access Token và Refresh Token Zalo OA vĩnh viễn',
           rowCount: authRes.rowCount,
           records: authRes.rows,
+        },
+        shipping_orders: {
+          description: 'Lịch sử phiếu vận đơn khách hàng (Web & Zalo OA)',
+          totalCount: parseInt(ordRes.rows[0]?.count || '0', 10),
+          recentRecords: recentOrders.rows,
         },
         crm_customers: {
           description: 'Hồ sơ danh bạ khách hàng Zalo',

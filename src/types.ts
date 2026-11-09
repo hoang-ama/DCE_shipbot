@@ -55,4 +55,7 @@ export interface OrderRecord {
   shippingInfo: ShippingInfo;
   estimatedPrice?: number;
   serviceType?: string;
+  source?: 'web' | 'zalo';
+  customerName?: string;
+  customerPhone?: string;
 }

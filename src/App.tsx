@@ -74,6 +74,18 @@ export default function App() {
       .catch(() => {
         setIsZaloConnected(false);
       });
+
+    // Synchronize shipping orders from PostgreSQL shipbot-db
+    fetch('/api/orders')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.orders)) {
+          setSavedOrders(data.orders);
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not contact /api/orders, keeping localStorage:', err);
+      });
   }, []);
 
   // Save orders to localStorage on change
@@ -186,7 +198,7 @@ export default function App() {
     ]);
   };
 
-  const handleConfirmOrder = () => {
+  const handleConfirmOrder = async () => {
     if (!shippingInfo.isComplete) return;
 
     const newOrder: OrderRecord = {
@@ -194,20 +206,43 @@ export default function App() {
       trackingCode,
       createdAt: new Date().toLocaleString('vi-VN'),
       status: 'created',
+      source: 'web',
+      customerName: shippingInfo.sender?.name || '',
+      customerPhone: shippingInfo.sender?.phone || '',
       shippingInfo,
     };
 
     setSavedOrders((prev) => [newOrder, ...prev]);
     setIsSuccessOpen(true);
+
+    try {
+      await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newOrder),
+      });
+    } catch (e) {
+      console.warn('Failed to save order to PostgreSQL server:', e);
+    }
   };
 
-  const handleDeleteOrder = (id: string) => {
+  const handleDeleteOrder = async (id: string) => {
     setSavedOrders((prev) => prev.filter((o) => o.id !== id));
+    try {
+      await fetch(`/api/orders/${id}`, { method: 'DELETE' });
+    } catch (e) {
+      console.warn('Failed to delete order from server:', e);
+    }
   };
 
-  const handleClearAllOrders = () => {
-    if (window.confirm('Bạn có chắc chắn muốn xóa toàn bộ lịch sử đơn hàng?')) {
+  const handleClearAllOrders = async () => {
+    if (window.confirm('Bạn có chắc chắn muốn xóa toàn bộ lịch sử đơn hàng trong Database?')) {
       setSavedOrders([]);
+      try {
+        await fetch('/api/orders', { method: 'DELETE' });
+      } catch (e) {
+        console.warn('Failed to clear all orders on server:', e);
+      }
     }
   };
 
