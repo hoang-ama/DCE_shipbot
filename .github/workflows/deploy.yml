@@ -77,6 +77,11 @@ jobs:
             git pull origin main
             # Nếu repo Private thì mở comment dòng dưới:
             # echo "${{ secrets.GHCR_READ_TOKEN }}" | docker login ghcr.io -u hoang-ama --password-stdin
-            docker compose pull app
-            docker compose up -d --no-deps app
+            if docker compose version >/dev/null 2>&1; then
+              COMPOSE="docker compose"
+            else
+              COMPOSE="docker-compose"
+            fi
+            $COMPOSE pull app
+            $COMPOSE up -d --no-deps app
             docker image prune -f
