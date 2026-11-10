@@ -149,3 +149,4 @@ git push origin main
 ---
 
 > **Nguyên tắc cốt lõi**: Luôn giữ vững tính ổn định của hệ thống hiện tại, bảo toàn kết nối PostgreSQL `shipbot-db`, cơ chế OAuth PKCE Zalo OA và các giải thuật địa chính tiếng Việt đã được tinh chỉnh.
+

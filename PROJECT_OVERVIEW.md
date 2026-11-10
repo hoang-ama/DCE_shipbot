@@ -233,3 +233,4 @@ Trong quá trình vận hành, ShipBot hỗ trợ cơ chế phối hợp thông 
 1. **Can thiệp trực tiếp từ CRM Drawer**: Nhân viên có thể mở bảng điều khiển CRM trên Web App, theo dõi thời gian thực tin nhắn của khách và bấm gửi tin nhắn trực tiếp qua Zalo OA.
 2. **Tự động chuyển tiếp khi khách không đồng ý giá 2 lần**: Nếu khách hàng từ chối mức giá ưu đãi lần 2, hệ thống tự động gắn nhãn "Cần tư vấn viên hỗ trợ" và gửi thông báo cho nhân viên trực chat.
 3. **Phát hiện khiếu nại / trường hợp khẩn cấp**: Khách phản hồi về sự cố trễ chuyến, mất hàng hoặc yêu cầu gặp người thật sẽ được chuyển sang chế độ Handover.
+
