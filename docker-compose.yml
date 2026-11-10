@@ -3,14 +3,18 @@ services:
     image: postgres:16-alpine
     container_name: dce-shipbot-db
     restart: unless-stopped
+    command: ["postgres", "-p", "2732"]
+    ports:
+      - "${POSTGRES_PORT:-2732}:2732"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-shipbot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shipbot_secret}
       POSTGRES_DB: ${POSTGRES_DB:-shipbot_db}
+      PGPORT: 2732
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shipbot} -d ${POSTGRES_DB:-shipbot_db}"]
+      test: ["CMD-SHELL", "pg_isready -p 2732 -U ${POSTGRES_USER:-shipbot} -d ${POSTGRES_DB:-shipbot_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,13 +29,13 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-2700}:2700"
     environment:
       NODE_ENV: ${NODE_ENV:-production}
-      PORT: 3000
-      APP_URL: ${APP_URL:-http://localhost:3000}
+      PORT: 2700
+      APP_URL: ${APP_URL:-http://localhost:2700}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-shipbot}:${POSTGRES_PASSWORD:-shipbot_secret}@postgres:5432/${POSTGRES_DB:-shipbot_db}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-shipbot}:${POSTGRES_PASSWORD:-shipbot_secret}@postgres:2732/${POSTGRES_DB:-shipbot_db}}
       ZALO_APP_ID: ${ZALO_APP_ID:-}
       ZALO_APP_SECRET: ${ZALO_APP_SECRET:-}
       ZALO_OA_ACCESS_TOKEN: ${ZALO_OA_ACCESS_TOKEN:-}
@@ -39,4 +43,3 @@ services:
 
 volumes:
   pg_data:
-

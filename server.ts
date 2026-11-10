@@ -15,7 +15,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.set('trust proxy', 1);
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 2700;
 
 app.use(express.json());
 
