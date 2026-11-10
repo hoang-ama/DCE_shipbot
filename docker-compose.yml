@@ -35,7 +35,7 @@ services:
       PORT: 2700
       APP_URL: ${APP_URL:-http://localhost:2700}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-shipbot}:${POSTGRES_PASSWORD:-shipbot_secret}@postgres:2732/${POSTGRES_DB:-shipbot_db}}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shipbot}:${POSTGRES_PASSWORD:-shipbot_secret}@postgres:2732/${POSTGRES_DB:-shipbot_db}
       ZALO_APP_ID: ${ZALO_APP_ID:-}
       ZALO_APP_SECRET: ${ZALO_APP_SECRET:-}
       ZALO_OA_ACCESS_TOKEN: ${ZALO_OA_ACCESS_TOKEN:-}
