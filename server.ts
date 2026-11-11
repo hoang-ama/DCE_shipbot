@@ -1823,7 +1823,7 @@ function smartExtractVietnamese(text: string, current: any) {
         candidate = c;
       }
     }
-    
+
     if (!candidate && distinctLandmarks.length === 1) {
       candidate = distinctLandmarks[0].fullAddress;
     }
@@ -2065,8 +2065,53 @@ export function generateShipmentTextSummary(info: any, trackingCode?: string): s
 
 ⏰ 4. THỜI GIAN GIAO NHẬN:
 - ${deliveryTime}
------------------------------
-🚀 Tạo tự động qua ShipBot AI Assistant`;
+-----------------------------`;
+}
+
+// Mẫu thông báo đơn hàng gửi cho nhân sự vận hành (DCE Ops - 0934691766) để gửi báo giá tới các Supplier/Đối tác nhà xe
+export function generateOpsShipmentNotification(
+  info: any,
+  trackingCode?: string,
+  source?: string,
+  customerName?: string,
+  customerPhone?: string
+): string {
+  const code = trackingCode || info?.trackingCode || generateTrackingCode();
+  const senderAddr = info?.sender?.address?.trim() || '(Chưa có)';
+  const receiverAddr = info?.receiver?.address?.trim() || '(Chưa có)';
+  const cargoName = info?.cargo?.name?.trim() || 'Hàng hóa chung';
+  const cargoWeight = info?.cargo?.weight?.trim() || (info?.cargo?.weightKg ? `${info.cargo.weightKg} kg` : '(Theo thực tế)');
+  const cargoDim = info?.cargo?.dimensions?.raw?.trim() ||
+    (info?.cargo?.dimensions?.length && info?.cargo?.dimensions?.width && info?.cargo?.dimensions?.height
+      ? `${info.cargo.dimensions.length}x${info.cargo.dimensions.width}x${info.cargo.dimensions.height} cm`
+      : 'Tiêu chuẩn');
+  const specialNotes = info?.cargo?.specialNotes?.trim() ? `\n📝 Ghi chú: ${info.cargo.specialNotes.trim()}` : '';
+  const deliveryTime = info?.deliveryTime?.trim() || 'Trong ngày / Thỏa thuận';
+
+  const sName = customerName || info?.sender?.name || '';
+  const sPhone = customerPhone || info?.sender?.phone || '';
+  const senderContact = [sName, sPhone].filter(Boolean).join(' - ');
+  const receiverContact = [info?.receiver?.name, info?.receiver?.phone].filter(Boolean).join(' - ');
+
+  return `🚛 [ĐI CHUNG EXPRESS - BÁO GIÁ ĐƠN MỚI CHO SUPPLIER]
+📋 Mã vận đơn: ${code}
+---------------------------------------------
+📍 ĐIỂM LẤY HÀNG:
+   ${senderAddr}${senderContact ? `\n   (Người gửi: ${senderContact})` : ''}
+
+🎯 ĐIỂM GIAO HÀNG:
+   ${receiverAddr}${receiverContact ? `\n   (Người nhận: ${receiverContact})` : ''}
+
+📦 THÔNG TIN KIỆN HÀNG:
+   - Tên loại hàng: ${cargoName}
+   - Khối lượng: ${cargoWeight}
+   - Kích thước: ${cargoDim}${specialNotes}
+
+⏰ THỜI GIAN GIAO NHẬN:
+   - ${deliveryTime}
+---------------------------------------------
+⚡ Kính gửi Quý Đối Tác / Nhà Xe báo giá vận chuyển tuyến này giúp Đi Chung Express.
+📞 Hotline Điều phối DCE Ops: ${process.env.DCE_OPS_PHONE || '0934691766'}`;
 }
 
 export function formatOrderClosingWithBill(info: any): string {
@@ -2166,20 +2211,20 @@ function generateNaturalVietnameseReply(info: any, nextKey?: string): string {
   switch (key) {
     case 'sender_address':
       if (cargoSnippet) {
-        return `Dạ em đã ghi nhận ${cargoSnippet} rồi ạ. Anh/chị cho em xin địa chỉ lấy hàng chi tiết (kèm phường/xã) với nhé ạ.`;
+        return `Em đã ghi nhận ${cargoSnippet} rồi ạ. Anh/chị cho em xin địa chỉ lấy hàng chi tiết (kèm phường/xã) với nhé ạ.`;
       }
       return 'Dạ bên em chuyên về dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Anh/chị cho em xin địa chỉ lấy hàng chi tiết (kèm phường/xã) với nhé ạ.';
 
     case 'receiver_address': {
       const sAddr = info.sender?.address?.trim();
       if (sAddr && cargoSnippet) {
-        return `Dạ em đã lưu điểm lấy hàng tại ${sAddr} và ${cargoSnippet} rồi ạ. Anh/chị cho em xin thêm địa chỉ giao hàng chi tiết (kèm phường/xã) mình muốn gửi đến đâu với ạ?`;
+        return `Em đã lưu điểm lấy hàng tại ${sAddr} và ${cargoSnippet} rồi ạ. Anh/chị cho em xin thêm địa chỉ giao hàng chi tiết (kèm phường/xã) mình muốn gửi đến đâu với ạ?`;
       }
       if (sAddr) {
-        return `Dạ em đã lưu điểm lấy hàng tại ${sAddr} rồi ạ. Anh/chị cho em xin thêm địa chỉ giao hàng chi tiết (kèm phường/xã) mình muốn gửi đến đâu với ạ?`;
+        return `Em đã lưu điểm lấy hàng tại ${sAddr} rồi ạ. Anh/chị cho em xin thêm địa chỉ giao hàng chi tiết (kèm phường/xã) mình muốn gửi đến đâu với ạ?`;
       }
       if (cargoSnippet) {
-        return `Dạ em đã ghi nhận ${cargoSnippet} rồi ạ. Anh/chị cho em xin thêm địa chỉ giao hàng chi tiết (kèm phường/xã) mình muốn gửi đến đâu với ạ?`;
+        return `Em đã ghi nhận ${cargoSnippet} rồi ạ. Anh/chị cho em xin thêm địa chỉ giao hàng chi tiết (kèm phường/xã) mình muốn gửi đến đâu với ạ?`;
       }
       return 'Dạ anh/chị cho em xin địa chỉ giao hàng chi tiết (kèm phường/xã) mình muốn gửi đến đâu với nhé ạ.';
     }
@@ -2333,7 +2378,7 @@ async function processChatPipeline(
 
   if (!rawMessage || typeof rawMessage !== 'string') {
     return {
-      reply: 'Dạ em chào anh/chị ạ! Bên em chuyên dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi toàn quốc. Anh/chị vui lòng gửi em xin thông tin địa chỉ lấy và giao hàng nhé!',
+      reply: 'Em chào anh/chị ạ! Bên em chuyên dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi toàn quốc. Anh/chị vui lòng gửi em xin thông tin địa chỉ lấy và giao hàng nhé!',
       shippingInfo: currentInfo || {},
       quickReplies: [],
     };
@@ -2619,17 +2664,17 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       const pR = parsed.receiver?.address ? cleanAddressText(parsed.receiver.address) : '';
 
       rawSAddr = (!isNotValidAddress(pS) ? pS : '') ||
-                 (!isNotValidAddress(fastExtracted.sender?.address) ? cleanAddressText(fastExtracted.sender?.address) : '') ||
-                 cleanAddressText(currentInfo?.sender?.address || '');
+        (!isNotValidAddress(fastExtracted.sender?.address) ? cleanAddressText(fastExtracted.sender?.address) : '') ||
+        cleanAddressText(currentInfo?.sender?.address || '');
 
       rawRAddr = (!isNotValidAddress(pR) ? pR : '') ||
-                 (!isNotValidAddress(fastExtracted.receiver?.address) ? cleanAddressText(fastExtracted.receiver?.address) : '') ||
-                 cleanAddressText(currentInfo?.receiver?.address || '');
+        (!isNotValidAddress(fastExtracted.receiver?.address) ? cleanAddressText(fastExtracted.receiver?.address) : '') ||
+        cleanAddressText(currentInfo?.receiver?.address || '');
     } else {
       rawSAddr = (!isNotValidAddress(fastExtracted.sender?.address) ? cleanAddressText(fastExtracted.sender?.address) : '') ||
-                 cleanAddressText(currentInfo?.sender?.address || '');
+        cleanAddressText(currentInfo?.sender?.address || '');
       rawRAddr = (!isNotValidAddress(fastExtracted.receiver?.address) ? cleanAddressText(fastExtracted.receiver?.address) : '') ||
-                 cleanAddressText(currentInfo?.receiver?.address || '');
+        cleanAddressText(currentInfo?.receiver?.address || '');
     }
 
     // Prevent duplicate address being assigned to both sender and receiver when only one was provided
@@ -2857,6 +2902,10 @@ let currentZaloAccessToken = process.env.ZALO_OA_ACCESS_TOKEN || '';
 let currentZaloRefreshToken = process.env.ZALO_REFRESH_TOKEN || '';
 let lastTokenRefreshTimestamp = Date.now();
 
+// Cấu hình Zalo nhân sự Điều phối Vận hành (DCE Ops)
+export const DCE_OPS_PHONE = process.env.DCE_OPS_PHONE || '0934691766';
+let dceOpsUserId: string = process.env.DCE_OPS_ZALO_USER_ID || '';
+
 // PostgreSQL persistent storage (SURVIVES ALL RENDER RESTARTS & DEPLOYMENTS!)
 let dbPool: pg.Pool | null = null;
 if (process.env.DATABASE_URL) {
@@ -3001,6 +3050,17 @@ async function saveShippingOrder(orderData: {
     }
   }
 
+  // Tự động đẩy đơn hàng sang Zalo nhân sự vận hành DCE Ops (0934691766) để gửi Supplier báo giá
+  notifyDceOps({
+    id,
+    trackingCode,
+    status,
+    customerName,
+    customerPhone,
+    source,
+    shippingInfo,
+  }).catch((err) => console.error('[DCE Ops Auto-Notify Error]', err?.message));
+
   return record;
 }
 
@@ -3021,7 +3081,7 @@ async function fetchZaloUserProfile(userId: string): Promise<{ display_name?: st
         phone: json.data.shared_info?.phone ? String(json.data.shared_info.phone) : undefined,
       };
     }
-  } catch (_) {}
+  } catch (_) { }
   return null;
 }
 
@@ -3067,7 +3127,7 @@ async function recordCrmInteraction(
           dbPool.query(
             `UPDATE crm_customers SET name = $1, avatar = $2, phone = COALESCE(NULLIF(phone, ''), $3) WHERE user_id = $4`,
             [customer.name, customer.avatar, customer.phone, userId]
-          ).catch(() => {});
+          ).catch(() => { });
         }
       }
     });
@@ -3098,7 +3158,7 @@ async function recordCrmInteraction(
             customerPhone: customer.phone,
             source: 'zalo',
             shippingInfo,
-          }).catch(() => {});
+          }).catch(() => { });
         }
       }
     }
@@ -3210,6 +3270,13 @@ async function initDatabaseAndRestore() {
         source VARCHAR(50) DEFAULT 'web',
         shipping_info JSONB NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS bot_settings (
+        key VARCHAR(100) PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS ops_notified BOOLEAN DEFAULT FALSE;
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS ops_notified_at TIMESTAMP WITH TIME ZONE;
       CREATE INDEX IF NOT EXISTS idx_crm_messages_user_id ON crm_messages(user_id);
       CREATE INDEX IF NOT EXISTS idx_crm_customers_last_interaction ON crm_customers(last_interaction DESC);
       CREATE INDEX IF NOT EXISTS idx_shipping_orders_created_at ON shipping_orders(created_at DESC);
@@ -3300,6 +3367,23 @@ async function initDatabaseAndRestore() {
     if (ordRes.rows.length > 0) {
       console.log(`[Database] Successfully restored ${ordRes.rows.length} shipping orders from PostgreSQL!`);
     }
+
+    // 6. Restore DCE Ops Configuration from PostgreSQL
+    try {
+      const opsRes = await dbPool.query(`SELECT value FROM bot_settings WHERE key = 'dce_ops_user_id' LIMIT 1`);
+      if (opsRes.rows.length > 0 && opsRes.rows[0].value) {
+        dceOpsUserId = opsRes.rows[0].value;
+        console.log(`[Database] Restored DCE Ops Zalo User ID from PostgreSQL: ${dceOpsUserId}`);
+      } else {
+        const phoneMatch = await dbPool.query(`SELECT user_id FROM crm_customers WHERE phone LIKE '%934691766%' ORDER BY last_interaction DESC LIMIT 1`);
+        if (phoneMatch.rows.length > 0 && phoneMatch.rows[0].user_id) {
+          dceOpsUserId = phoneMatch.rows[0].user_id;
+          console.log(`[Database] Auto-linked DCE Ops Zalo User ID from customer phone match: ${dceOpsUserId}`);
+        }
+      }
+    } catch (e: any) {
+      console.warn('[Database] Could not restore DCE Ops settings:', e?.message);
+    }
   } catch (e: any) {
     console.error('[Database] Failed to init or restore from PostgreSQL:', e?.message);
   }
@@ -3376,7 +3460,7 @@ function saveSessionsCache() {
         VALUES ($1, $2, NOW())
         ON CONFLICT (user_id) DO UPDATE
         SET session_data = EXCLUDED.session_data, last_active = NOW();
-      `, [uid, JSON.stringify(sess)]).catch(() => {});
+      `, [uid, JSON.stringify(sess)]).catch(() => { });
     }
   }
 }
@@ -3505,6 +3589,114 @@ async function sendZaloOAReply(userId: string, replyText: string): Promise<boole
     console.error('[Zalo OA] Error sending message:', err);
     return false;
   }
+}
+
+// Đẩy thông tin đơn hàng tới Zalo của nhân sự điều phối vận hành (DCE Ops - 0934691766) để gửi Supplier báo giá
+export async function notifyDceOps(orderData: {
+  id?: string;
+  trackingCode: string;
+  status?: string;
+  customerName?: string;
+  customerPhone?: string;
+  source?: string;
+  shippingInfo: any;
+}): Promise<{
+  success: boolean;
+  notified: boolean;
+  text: string;
+  opsPhone: string;
+  opsUserId: string | null;
+  error?: string;
+}> {
+  const opsPhone = DCE_OPS_PHONE;
+  const opsNotificationText = generateOpsShipmentNotification(
+    orderData.shippingInfo,
+    orderData.trackingCode,
+    orderData.source || 'web',
+    orderData.customerName,
+    orderData.customerPhone
+  );
+
+  // 1. Nếu chưa có dceOpsUserId, thử dò tìm trong crm_customers xem số 0934691766 đã từng tương tác chưa
+  if (!dceOpsUserId && dbPool) {
+    try {
+      const res = await dbPool.query(
+        `SELECT user_id FROM crm_customers WHERE phone LIKE '%934691766%' OR name ILIKE '%ops%' ORDER BY last_interaction DESC LIMIT 1`
+      );
+      if (res.rows.length > 0 && res.rows[0].user_id) {
+        dceOpsUserId = res.rows[0].user_id;
+        console.log(`[DCE Ops] Auto-resolved dceOpsUserId from crm_customers: ${dceOpsUserId}`);
+      }
+    } catch (_) {}
+  }
+
+  // 2. Nếu đã liên kết Zalo user_id của Ops -> Bắn tin nhắn trực tiếp qua Zalo OA
+  if (dceOpsUserId) {
+    try {
+      const sent = await sendZaloOAReply(dceOpsUserId, opsNotificationText);
+      if (sent) {
+        logZaloEvent('outgoing_reply', `Đã bắn thông tin đơn ${orderData.trackingCode} tới Zalo DCE Ops (${opsPhone})`, {
+          trackingCode: orderData.trackingCode,
+          opsPhone,
+          opsUserId: dceOpsUserId,
+        });
+
+        // Ghi lại vào CRM
+        await recordCrmInteraction(
+          dceOpsUserId,
+          'bot',
+          opsNotificationText,
+          orderData.shippingInfo,
+          'Thông Báo Đơn Cho DCE Ops'
+        );
+
+        // Đánh dấu đơn đã thông báo cho Ops trong Database
+        if (dbPool) {
+          dbPool.query(
+            `UPDATE shipping_orders SET ops_notified = TRUE, ops_notified_at = NOW() WHERE tracking_code = $1`,
+            [orderData.trackingCode]
+          ).catch(() => {});
+        }
+
+        return {
+          success: true,
+          notified: true,
+          text: opsNotificationText,
+          opsPhone,
+          opsUserId: dceOpsUserId,
+        };
+      } else {
+        return {
+          success: false,
+          notified: false,
+          text: opsNotificationText,
+          opsPhone,
+          opsUserId: dceOpsUserId,
+          error: 'Gửi tin qua Zalo OA thất bại. Kiểm tra Access Token hoặc quyền tin CS.',
+        };
+      }
+    } catch (err: any) {
+      console.error('[DCE Ops Notification] Error sending to Ops:', err?.message);
+      return {
+        success: false,
+        notified: false,
+        text: opsNotificationText,
+        opsPhone,
+        opsUserId: dceOpsUserId,
+        error: err?.message,
+      };
+    }
+  }
+
+  console.log(`[DCE Ops] Đơn hàng ${orderData.trackingCode} đã ghi nhận. Chưa liên kết Zalo user_id của Ops (${opsPhone}). Ops có thể nhắn #ops tới Zalo OA.`);
+  return {
+    success: true,
+    notified: false,
+    text: opsNotificationText,
+    opsPhone,
+    opsUserId: null,
+    error: 'Chưa liên kết Zalo user_id của Ops (hãy nhắn #ops tới Zalo OA từ 0934691766 để kích hoạt đẩy tự động)',
+  };
 }
 
 // API Route: Chủ động gửi phiếu vận đơn sang Zalo cho khách hàng
@@ -3752,6 +3944,11 @@ app.get('/api/zalo/status', async (req: Request, res: Response) => {
       accessTokenMasked: token ? `${token.slice(0, 6)}...${token.slice(-4)}` : null,
       refreshTokenMasked: refreshToken ? `${refreshToken.slice(0, 6)}...${refreshToken.slice(-4)}` : null,
     },
+    ops: {
+      phone: DCE_OPS_PHONE,
+      isLinked: Boolean(dceOpsUserId),
+      userId: dceOpsUserId || null,
+    },
     stats: {
       activeSessions: zaloUserSessions.size,
       serverTime: new Date().toISOString(),
@@ -3856,7 +4053,40 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
     });
     console.log(`[Zalo OA] Incoming message from user ${userId}: ${userText}`);
     try {
-      const isResetOrder = /^(?:tạo\s*đơn\s*mới|đơn\s*mới|hủy\s*đơn|làm\s*lại|reset)\b/i.test(userText.trim());
+      const trimmed = userText.trim();
+      const isOpsCommand =
+        /^(?:#ops|ops|#dceops|dce\s*ops)(?:\s+(0\d{9,10}|\+?84\d{9,10}))?$/i.test(trimmed) ||
+        trimmed.toLowerCase() === '#ops' ||
+        trimmed.toLowerCase() === 'ops' ||
+        trimmed.includes('0934691766');
+
+      if (isOpsCommand) {
+        dceOpsUserId = userId;
+        console.log(`[DCE Ops] Linked Zalo User ID: ${userId} to DCE Ops (${DCE_OPS_PHONE})`);
+
+        if (dbPool) {
+          dbPool.query(
+            `INSERT INTO bot_settings (key, value, updated_at)
+             VALUES ('dce_ops_user_id', $1, NOW())
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();`,
+            [userId]
+          ).catch(() => {});
+
+          dbPool.query(
+            `UPDATE crm_customers SET name = 'DCE Ops (0934691766)', phone = '0934691766' WHERE user_id = $1;`,
+            [userId]
+          ).catch(() => {});
+        }
+
+        const reply = `✅ Đã kết nối tài khoản Zalo này với vai trò: ĐIỀU PHỐI VẬN HÀNH DCE (Hotline: ${DCE_OPS_PHONE})!\n\nTừ bây giờ, bất cứ khi nào có đơn vận chuyển mới (từ Web hoặc khách chốt qua Zalo OA), hệ thống sẽ TỰ ĐỘNG gửi thông tin báo giá chi tiết về Zalo này để bạn gửi ngay cho các Supplier/Nhà xe đối tác.\n\nCảm ơn bạn!`;
+
+        await sendZaloOAReply(userId, reply);
+        await recordCrmInteraction(userId, 'bot', reply, {}, 'Xác Nhận Kích Hoạt DCE Ops');
+        logZaloEvent('token_update', `Đã liên kết Zalo user_id ${userId} cho DCE Ops (${DCE_OPS_PHONE})`);
+        return;
+      }
+
+      const isResetOrder = /^(?:tạo\s*đơn\s*mới|đơn\s*mới|hủy\s*đơn|làm\s*lại|reset)\b/i.test(trimmed);
 
       let session = zaloUserSessions.get(userId);
       // Reset if inactive for > 6 hours or user explicitly requested new order
@@ -4075,6 +4305,59 @@ app.post('/api/orders', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/orders/notify-ops - Chủ động bắn thông tin đơn hàng tới Zalo DCE Ops (0934691766) để gửi Supplier báo giá
+app.post('/api/orders/notify-ops', async (req: Request, res: Response) => {
+  try {
+    const { id, trackingCode, status, customerName, customerPhone, source, shippingInfo } = req.body || {};
+    if (!shippingInfo) {
+      return res.status(400).json({ error: 'shippingInfo is required' });
+    }
+    const result = await notifyDceOps({
+      id,
+      trackingCode: trackingCode || shippingInfo?.trackingCode || generateTrackingCode(),
+      status: status || 'created',
+      customerName: customerName || shippingInfo?.sender?.name,
+      customerPhone: customerPhone || shippingInfo?.sender?.phone,
+      source: source || 'web',
+      shippingInfo,
+    });
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message });
+  }
+});
+
+// GET /api/ops/status - Kiểm tra trạng thái liên kết Zalo của nhân sự điều phối DCE Ops
+app.get('/api/ops/status', async (_req: Request, res: Response) => {
+  return res.json({
+    opsPhone: DCE_OPS_PHONE,
+    opsUserId: dceOpsUserId || null,
+    isLinked: Boolean(dceOpsUserId),
+  });
+});
+
+// POST /api/ops/bind - Liên kết thủ công Zalo User ID cho DCE Ops
+app.post('/api/ops/bind', async (req: Request, res: Response) => {
+  const { userId } = req.body || {};
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required' });
+  }
+  dceOpsUserId = String(userId).trim();
+  if (dbPool) {
+    dbPool.query(
+      `INSERT INTO bot_settings (key, value, updated_at) VALUES ('dce_ops_user_id', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();`,
+      [dceOpsUserId]
+    ).catch(() => {});
+  }
+  return res.json({
+    success: true,
+    opsPhone: DCE_OPS_PHONE,
+    opsUserId: dceOpsUserId,
+    message: `Đã liên kết Zalo user_id ${dceOpsUserId} cho DCE Ops (${DCE_OPS_PHONE}) thành công.`,
+  });
+});
+
 // DELETE /api/orders/:id - Xóa 1 phiếu vận đơn khỏi Database
 app.delete('/api/orders/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -4175,7 +4458,7 @@ app.get('/api/db/overview', async (_req: Request, res: Response) => {
 // Render Keepalive to prevent free tier idle spin-down
 const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || 'https://dce-shipbot.onrender.com';
 setInterval(() => {
-  fetch(`${RENDER_EXTERNAL_URL}/api/zalo/webhook`).catch(() => {});
+  fetch(`${RENDER_EXTERNAL_URL}/api/zalo/webhook`).catch(() => { });
 }, 10 * 60 * 1000);
 
 // Setup Vite middleware in dev or static files in production

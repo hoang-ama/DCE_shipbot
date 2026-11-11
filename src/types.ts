@@ -58,4 +58,6 @@ export interface OrderRecord {
   source?: 'web' | 'zalo';
   customerName?: string;
   customerPhone?: string;
+  opsNotified?: boolean;
+  opsNotifiedAt?: string;
 }

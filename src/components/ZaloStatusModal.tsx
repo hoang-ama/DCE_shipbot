@@ -36,6 +36,11 @@ interface ZaloStatusData {
     accessTokenMasked: string | null;
     refreshTokenMasked: string | null;
   };
+  ops?: {
+    phone: string;
+    isLinked: boolean;
+    userId: string | null;
+  };
   stats: {
     activeSessions: number;
     serverTime: string;
@@ -406,6 +411,28 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
                     {data?.database?.connected
                       ? 'Token an toàn khi Render ngủ hoặc redeploy'
                       : 'Bấm tab "Lưu Vĩnh Viễn" để gắn DB miễn phí'}
+                  </p>
+                </div>
+
+                {/* DCE Ops Hotline / Notification Status */}
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                  <span className="text-slate-500 font-medium flex items-center gap-1">
+                    <Zap className="w-3 h-3" /> Điều phối DCE Ops
+                  </span>
+                  <div className="flex items-center gap-1 text-[11px] font-semibold">
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        data?.ops?.isLinked ? 'bg-emerald-500' : 'bg-blue-500'
+                      }`}
+                    />
+                    <span className={data?.ops?.isLinked ? 'text-emerald-700' : 'text-blue-800'}>
+                      Hotline: {data?.ops?.phone || '0934691766'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    {data?.ops?.isLinked
+                      ? '✅ Đã kết nối Zalo cá nhân - Tự động đẩy đơn mới'
+                      : 'Nhắn "#ops" tới OA từ 0934691766 để kích hoạt tự động'}
                   </p>
                 </div>
 

@@ -1838,3 +1838,48 @@ ${info.cargo.specialNotes ? `- Ghi chú chi tiết: ${info.cargo.specialNotes}` 
 -----------------------------
 🚀 Tạo tự động qua ShipBot AI Assistant`;
 }
+
+// Số điện thoại Zalo của nhân sự điều phối vận hành Đi Chung Express (DCE Ops)
+export const DCE_OPS_PHONE = '0934691766';
+
+// Mẫu thông điệp báo giá đơn gửi tới Zalo DCE Ops (0934691766) để Ops gửi tiếp cho các Supplier/Nhà xe đối tác
+export function generateOpsShipmentNotification(
+  info: ShippingInfo,
+  trackingCode?: string,
+  source?: string
+): string {
+  const code = trackingCode || 'VN-LOG-XXXX';
+  const senderAddr = info?.sender?.address?.trim() || '(Chưa có)';
+  const receiverAddr = info?.receiver?.address?.trim() || '(Chưa có)';
+  const cargoName = info?.cargo?.name?.trim() || 'Hàng hóa chung';
+  const cargoWeight = info?.cargo?.weight?.trim() || (info?.cargo?.weightKg ? `${info.cargo.weightKg} kg` : '(Theo thực tế)');
+  const cargoDim = info?.cargo?.dimensions?.raw?.trim() ||
+    (info?.cargo?.dimensions?.length && info?.cargo?.dimensions?.width && info?.cargo?.dimensions?.height
+      ? `${info.cargo.dimensions.length}x${info.cargo.dimensions.width}x${info.cargo.dimensions.height} cm`
+      : 'Tiêu chuẩn');
+  const specialNotes = info?.cargo?.specialNotes?.trim() ? `\n📝 Ghi chú: ${info.cargo.specialNotes.trim()}` : '';
+  const deliveryTime = info?.deliveryTime?.trim() || 'Trong ngày / Thỏa thuận';
+
+  const senderContact = [info?.sender?.name, info?.sender?.phone].filter(Boolean).join(' - ');
+  const receiverContact = [info?.receiver?.name, info?.receiver?.phone].filter(Boolean).join(' - ');
+
+  return `🚛 [ĐI CHUNG EXPRESS - BÁO GIÁ ĐƠN MỚI CHO SUPPLIER]
+📋 Mã vận đơn: ${code}
+---------------------------------------------
+📍 ĐIỂM LẤY HÀNG:
+   ${senderAddr}${senderContact ? `\n   (Người gửi: ${senderContact})` : ''}
+
+🎯 ĐIỂM GIAO HÀNG:
+   ${receiverAddr}${receiverContact ? `\n   (Người nhận: ${receiverContact})` : ''}
+
+📦 THÔNG TIN KIỆN HÀNG:
+   - Tên loại hàng: ${cargoName}
+   - Khối lượng: ${cargoWeight}
+   - Kích thước: ${cargoDim}${specialNotes}
+
+⏰ THỜI GIAN GIAO NHẬN:
+   - ${deliveryTime}
+---------------------------------------------
+⚡ Kính gửi Quý Đối Tác / Nhà Xe báo giá vận chuyển tuyến này giúp Đi Chung Express.
+📞 Hotline Điều phối DCE Ops: ${DCE_OPS_PHONE}`;
+}

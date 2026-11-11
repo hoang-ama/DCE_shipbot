@@ -16,11 +16,14 @@ import {
   Sparkles,
   ArrowRightLeft,
   Clock,
+  Send,
 } from 'lucide-react';
 import { ShippingInfo } from '../types';
 import {
   calculateVolumetricWeight,
   generateShipmentTextSummary,
+  generateOpsShipmentNotification,
+  DCE_OPS_PHONE,
   checkHasWardCommune,
   isValidVNPhone,
 } from '../utils/logistics';
@@ -61,6 +64,7 @@ export const WaybillCard: React.FC<WaybillCardProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editableInfo, setEditableInfo] = useState<ShippingInfo>(shippingInfo);
   const [copied, setCopied] = useState(false);
+  const [opsNotified, setOpsNotified] = useState(false);
 
   // Sync state if external changes occur while not in edit mode
   React.useEffect(() => {
@@ -89,6 +93,29 @@ export const WaybillCard: React.FC<WaybillCardProps> = ({
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSendToOps = async () => {
+    const opsText = generateOpsShipmentNotification(shippingInfo, trackingCode, 'web');
+    navigator.clipboard.writeText(opsText);
+    setOpsNotified(true);
+    setTimeout(() => setOpsNotified(false), 3000);
+
+    try {
+      fetch('/api/orders/notify-ops', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trackingCode,
+          shippingInfo,
+          source: 'web',
+          customerName: shippingInfo.sender?.name,
+          customerPhone: shippingInfo.sender?.phone,
+        }),
+      }).catch(() => {});
+    } catch (_) {}
+
+    window.open(`https://zalo.me/${DCE_OPS_PHONE}`, '_blank');
   };
 
   return (
@@ -793,6 +820,30 @@ export const WaybillCard: React.FC<WaybillCardProps> = ({
 
       {/* Footer Sticky Actions */}
       <div className="p-4 bg-slate-50 border-t border-slate-200 space-y-2">
+        {/* Quick Send to DCE Ops Button */}
+        <button
+          onClick={handleSendToOps}
+          disabled={!shippingInfo.isComplete}
+          className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer ${
+            shippingInfo.isComplete
+              ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 active:scale-[0.99]'
+              : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+          }`}
+          title="Bắn thông tin đơn hàng tới Zalo DCE Ops (0934691766) để gửi Supplier báo giá"
+        >
+          {opsNotified ? (
+            <>
+              <Check className="w-4 h-4 text-emerald-600" />
+              <span className="text-emerald-700">Đã chép báo giá & mở Zalo 0934691766!</span>
+            </>
+          ) : (
+            <>
+              <Send className="w-4 h-4 text-blue-600" />
+              <span>Bắn Zalo cho DCE Ops (0934691766) để báo giá</span>
+            </>
+          )}
+        </button>
+
         {/* Copy Button */}
         <button
           onClick={handleCopySummary}

@@ -9,3 +9,4 @@ coverage/
 .zalo_token.json
 REF. DOC/
 
+*.sql

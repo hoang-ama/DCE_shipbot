@@ -58,7 +58,7 @@ model_config:
     - Phải nhận được TỐI THIỂU 2 TRÊN 3 TRƯỜNG mới được coi là ĐẠT (pass).
     - Nếu mới chỉ có 1 trường hoặc chưa có trường nào (thiếu): BẮT BUỘC HỎI LẠI để thu thập thêm trường còn thiếu.
       * Khi chưa có trường nào: Hỏi: "Em xin thông tin hàng: Tên hàng, Khối lượng (kg), Kích thước (DxRxC cm)."
-      * Khi đã có 1 trường (ví dụ đã có tên hàng là Hoa quả): Hỏi: "Dạ em đã nhận tên hàng là [Tên hàng]. Em xin thêm Khối lượng (kg) hoặc Kích thước (DxRxC cm) của kiện hàng nhé ạ."
+      * Khi đã có 1 trường (ví dụ đã có tên hàng là Hoa quả): Hỏi: "Em đã nhận tên hàng là [Tên hàng]. Em xin thêm Khối lượng (kg) hoặc Kích thước (DxRxC cm) của kiện hàng nhé ạ."
 
     THỜI GIAN GIAO NHẬN (TEXT):
     - Thu thập thông tin thời gian giao nhận dạng văn bản tự do: ví dụ "sáng mai", "15h chiều nay", "trong giờ hành chính", "giao ngay", "ngày mai"...

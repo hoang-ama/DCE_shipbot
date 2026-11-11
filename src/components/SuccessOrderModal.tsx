@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Copy, Check, X, PackageCheck } from 'lucide-react';
+import { CheckCircle2, Copy, Check, X, PackageCheck, Send } from 'lucide-react';
 import { ShippingInfo } from '../types';
-import { generateShipmentTextSummary } from '../utils/logistics';
+import { generateShipmentTextSummary, generateOpsShipmentNotification, DCE_OPS_PHONE } from '../utils/logistics';
 
 interface SuccessOrderModalProps {
   isOpen: boolean;
@@ -19,6 +19,7 @@ export const SuccessOrderModal: React.FC<SuccessOrderModalProps> = ({
   onNewOrder,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [opsNotified, setOpsNotified] = useState(false);
   if (!isOpen) return null;
 
   const handleCopy = () => {
@@ -26,6 +27,29 @@ export const SuccessOrderModal: React.FC<SuccessOrderModalProps> = ({
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleNotifyOps = () => {
+    const opsText = generateOpsShipmentNotification(shippingInfo, trackingCode, 'web');
+    navigator.clipboard.writeText(opsText);
+    setOpsNotified(true);
+    setTimeout(() => setOpsNotified(false), 3000);
+
+    try {
+      fetch('/api/orders/notify-ops', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trackingCode,
+          shippingInfo,
+          source: 'web',
+          customerName: shippingInfo.sender?.name,
+          customerPhone: shippingInfo.sender?.phone,
+        }),
+      }).catch(() => {});
+    } catch (_) {}
+
+    window.open(`https://zalo.me/${DCE_OPS_PHONE}`, '_blank');
   };
 
   return (
@@ -115,19 +139,37 @@ export const SuccessOrderModal: React.FC<SuccessOrderModalProps> = ({
 
           {/* Action Buttons */}
           <div className="space-y-2 pt-1">
+            {/* Direct Send to DCE Ops */}
             <button
-              onClick={handleCopy}
-              className="w-full py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+              onClick={handleNotifyOps}
+              className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-[0.99] cursor-pointer"
             >
-              {copied ? (
+              {opsNotified ? (
                 <>
-                  <Check className="w-4 h-4 text-white" />
-                  <span>Đã sao chép vào bộ nhớ!</span>
+                  <Check className="w-4 h-4 text-emerald-300" />
+                  <span>Đã copy báo giá & mở Zalo 0934691766!</span>
                 </>
               ) : (
                 <>
-                  <Copy className="w-4 h-4" />
-                  <span>Sao chép thông tin đơn hàng (gửi Zalo / Khách hàng)</span>
+                  <Send className="w-4 h-4" />
+                  <span>📲 Bắn Zalo cho DCE Ops (0934691766) để báo giá Supplier</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleCopy}
+              className="w-full py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  <span className="text-emerald-700 font-bold">Đã sao chép vào bộ nhớ!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4 text-slate-500" />
+                  <span>Sao chép thông tin đơn hàng (gửi Khách hàng)</span>
                 </>
               )}
             </button>
@@ -137,7 +179,7 @@ export const SuccessOrderModal: React.FC<SuccessOrderModalProps> = ({
                 onClose();
                 onNewOrder();
               }}
-              className="w-full py-2.5 px-4 rounded-xl text-slate-600 hover:text-slate-900 text-xs font-semibold text-center hover:bg-slate-50 transition-colors cursor-pointer"
+              className="w-full py-2 px-4 rounded-xl text-slate-500 hover:text-slate-800 text-xs font-semibold text-center hover:bg-slate-50 transition-colors cursor-pointer"
             >
               + Tạo thêm đơn vận chuyển khác
             </button>
