@@ -147,6 +147,51 @@ flowchart TD
 
 ---
 
+## 2B. LỘ TRÌNH TIẾP THEO (NEXT STEPS — HOÀN THIỆN & MỞ RỘNG PRODUCTION)
+
+### GIAI ĐOẠN 5: Kích Hoạt & Kiểm Thử Thực Chiến Production (Operational Readiness)
+> **Mục tiêu**: Đưa toàn bộ luồng tự động hóa vào vận hành thực tế không đứt đoạn giữa Zalo OA, Tổng đài Asterisk, Ngân hàng và Điều phối viên.
+
+- [ ] **5.1. Liên kết Zalo OA cho Ops & Default Supplier**:
+  - Dùng Zalo số **`0934691766`** nhắn `#ops` vào Zalo OA Đi Chung Express để gắn `dce_ops_user_id`.
+  - Dùng Zalo số **`0906106066`** (`Dichung Express`) nhắn `#supplier` vào Zalo OA để gắn `default_supplier_user_id`.
+- [ ] **5.2. Cấu hình Thanh toán & ZNS trên Web UI (`https://ai.dichung.vn`)**:
+  - Mở modal **Zalo OA** $\rightarrow$ điền **Mã ngân hàng, Số tài khoản, Tên chủ TK** thật của công ty để sinh mã VietQR chính xác.
+  - Đăng ký & duyệt 01 mẫu **Zalo ZNS Template** chào sau cuộc gọi, điền **ZNS Template ID** vào mục **Tổng đài Asterisk VoIP & Zalo ZNS** trên Web UI.
+- [ ] **5.3. Kết nối Webhook Ngân hàng thật (SePAY / Casso)**:
+  - Trỏ webhook biến động số dư ngân hàng về `https://ai.dichung.vn/api/payment/vietqr-webhook` và thiết lập biến môi trường `PAYMENT_WEBHOOK_SECRET` trên VPS để tự động đối soát `PAID`.
+- [ ] **5.4. Nạp Dialplan lên Tổng đài Asterisk thật**:
+  - Thu âm lời chào `custom/dce-zalo-greeting` và cấu hình `/etc/asterisk/extensions_custom.conf` theo hướng dẫn trong [`ASTERISK_INTEGRATION.md`](ASTERISK_INTEGRATION.md), test thực tế bằng SĐT ngoài.
+
+---
+
+### GIAI ĐOẠN 6: Nâng Cấp Quản Trị Vận Hành & Chống Rớt Đơn (Production Hardening)
+> **Mục tiêu**: Giảm tối đa thao tác thủ công cho Kế toán/Ops và nâng cao tỷ lệ chốt đơn tự động.
+
+- [ ] **6.1. Giao diện Quản trị Bảng giá Chuẩn trên Web UI (Pricing Admin Modal)**:
+  - Xây dựng giao diện bảng trên Web UI kết nối `GET/POST /api/pricing/routes` để Ops/Kế toán tự thêm tuyến, chỉnh giá gốc, sửa tỷ lệ Margin (+30%) và bật/tắt phụ phí mà không cần sửa code.
+- [ ] **6.2. Xử lý Ảnh chụp Kiện hàng qua Zalo (`user_send_image`)**:
+  - Mở rộng Webhook Zalo OA nhận sự kiện `user_send_image`, dùng **Gemini Multimodal (Vision)** ước lượng kích thước/tính chất hàng hóa (dễ vỡ, cồng kềnh) và đính kèm ảnh vào trang `/quote/:trackingCode` cho Ops/Supplier xem trực tiếp.
+- [ ] **6.3. Cơ chế Nhắc nhở Tự động (SLA Follow-up Timer)**:
+  - *Nhắc Ops/Supplier*: Đơn trạng thái `quoting` quá 10–15 phút chưa có giá $\rightarrow$ Bot tự động ping nhắc lại trên Zalo DCE Ops.
+  - *Nhắc Khách chốt đơn*: Đơn trạng thái `quoted` quá 30 phút khách chưa phản hồi $\rightarrow$ Bot gửi tin hỏi thăm nhẹ nhàng (hoặc gợi ý mã ưu đãi 10% nếu chưa dùng).
+- [ ] **6.4. Phân tuyến Đa Nhà Cung Cấp (Multi-Supplier Routing)**:
+  - Mở rộng danh bạ Supplier theo **Tuyến / Loại xe** (Bắc–Nam, Nội thành, Hàng lạnh...) và hỗ trợ chọn báo giá tối ưu nhất khi nhiều Supplier cùng phản hồi vào `/quote/:trackingCode`.
+
+---
+
+### GIAI ĐOẠN 7: Tích Hợp Hệ Thống Lõi & Đo Lường Hiệu Suất (Scale & Analytics)
+> **Mục tiêu**: Đồng bộ khép kín với ERP nội bộ và theo dõi hiệu quả vận hành theo thời gian thực.
+
+- [ ] **7.1. Trang Tracking Hành Trình Đơn Hàng (`/track/:trackingCode`)**:
+  - Gửi kèm link cho khách tự theo dõi trạng thái đơn theo thời gian thực (*Tiếp nhận $\rightarrow$ Chốt giá $\rightarrow$ Đang lấy hàng $\rightarrow$ Đang giao $\rightarrow$ Hoàn tất*).
+- [ ] **7.2. Đồng bộ 2 chiều với DC Hub Portal (`portal.dichung.vn`)**:
+  - Khi đơn chuyển sang `dispatched`, tự động đẩy API tạo đơn chính thức sang ERP/Portal nội bộ của Đi Chung Express để kế toán đối soát công nợ & xuất hóa đơn VAT.
+- [ ] **7.3. Dashboard Thống kê Chuyển đổi (Analytics)**:
+  - Theo dõi tỷ lệ chốt đơn theo từng kênh (Zalo OA vs Tổng đài Asterisk), tỷ lệ đơn khớp Bảng giá chuẩn vs đơn ngoại lệ, doanh thu & thời gian phản hồi trung bình của Ops/Supplier.
+
+---
+
 ## 3. BẢNG TỔNG HỢP LỘ TRÌNH & ƯU TIÊN THỰC HIỆN
 
 | Giai đoạn | Hạng mục chính | Độ ưu tiên | Trạng thái | Thời gian dự kiến |
@@ -156,6 +201,9 @@ flowchart TD
 | **Giai đoạn 2** | Chuyển đơn ngoại lệ cho Ops + Default Supplier, Quick Quote Portal (`/quote/:code`) & `#baogia` | Cao | **Hoàn thành** | Đã vận hành |
 | **Giai đoạn 3** | Phiếu chốt đơn, Thương lượng 10%, VietQR động (`/pay/:code`) & Lệnh điều phối lấy hàng | Cao | **Hoàn thành** | Đã vận hành |
 | **Giai đoạn 4** | Asterisk IVR chào + Webhook CallerID + Zalo ZNS/OA khởi động collect đơn | Trung bình | **Hoàn thành** | Đã vận hành |
+| **Giai đoạn 5** | Kích hoạt `#ops`/`#supplier`, cấu hình VietQR thật, ZNS Template & Dialplan Asterisk | Cực cao | **Sẵn sàng làm ngay** | 1 ngày |
+| **Giai đoạn 6** | UI Quản trị Bảng giá, Vision đọc ảnh kiện hàng Zalo, SLA Follow-up & Multi-Supplier | Cao | Kế hoạch tiếp theo | 3 - 5 ngày |
+| **Giai đoạn 7** | Trang Tracking `/track/:code`, Đồng bộ DC Hub Portal & Dashboard Analytics | Trung bình | Mở rộng | 5 - 7 ngày |
 
 ---
 
