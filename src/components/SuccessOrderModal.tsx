@@ -161,6 +161,16 @@ export const SuccessOrderModal: React.FC<SuccessOrderModalProps> = ({
               )}
             </button>
 
+            {/* Quick VietQR / COD Checkout Link */}
+            <a
+              href={`/pay/${encodeURIComponent(trackingCode)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+            >
+              <span>💳 Mở Trang Thanh Toán VietQR / Chốt COD</span>
+            </a>
+
             <button
               onClick={handleCopy}
               className="w-full py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200"

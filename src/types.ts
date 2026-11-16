@@ -57,11 +57,17 @@ export interface RoutingConfig {
   isSupplierLinked?: boolean;
 }
 
+export interface PaymentConfig {
+  bankId: string;
+  accountNo: string;
+  accountName: string;
+}
+
 export interface OrderRecord {
   id: string;
   trackingCode: string;
   createdAt: string;
-  status: 'created' | 'quoting' | 'quoted' | 'picked_up' | 'delivering' | 'delivered';
+  status: 'created' | 'quoting' | 'quoted' | 'confirmed' | 'paid' | 'cod_pending' | 'dispatched' | 'picked_up' | 'delivering' | 'delivered';
   shippingInfo: ShippingInfo;
   estimatedPrice?: number;
   baseCostVnd?: number;
@@ -69,6 +75,11 @@ export interface OrderRecord {
   quotedAt?: string;
   quoteNote?: string;
   zaloUserId?: string;
+  paymentMethod?: 'vietqr' | 'cod';
+  paymentStatus?: 'unpaid' | 'pending' | 'paid' | 'cod_pending';
+  paidAt?: string;
+  paymentRef?: string;
+  negotiationUsed?: boolean;
   serviceType?: string;
   source?: 'web' | 'zalo';
   customerName?: string;

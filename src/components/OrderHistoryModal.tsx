@@ -127,12 +127,16 @@ export const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
                         ? 'bg-amber-50 text-amber-700 border-amber-200'
                         : order.status === 'quoted'
                         ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        : order.status === 'dispatched' || order.paymentStatus === 'paid'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
                         : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                     }`}>
                       {order.status === 'quoting'
                         ? 'Chờ báo giá'
                         : order.status === 'quoted'
                         ? `Đã báo giá${order.estimatedPrice ? `: ${order.estimatedPrice.toLocaleString('vi-VN')} đ` : ''}`
+                        : order.status === 'dispatched'
+                        ? `${order.paymentStatus === 'paid' ? 'Đã TT VietQR' : 'Đã lên lệnh COD'}${order.estimatedPrice ? ` • ${order.estimatedPrice.toLocaleString('vi-VN')} đ` : ''}`
                         : `Đã tạo đơn${order.estimatedPrice ? ` • ${order.estimatedPrice.toLocaleString('vi-VN')} đ` : ''}`}
                     </span>
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
@@ -203,6 +207,16 @@ export const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
                   </button>
 
                   <div className="flex items-center gap-1.5">
+                    <a
+                      href={`/pay/${encodeURIComponent(order.trackingCode)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-2 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100 text-emerald-800 text-[11px] flex items-center gap-1 font-semibold transition-colors"
+                      title="Mở trang Thanh toán VietQR / Chốt COD"
+                    >
+                      <span>Thanh toán</span>
+                    </a>
+
                     <a
                       href={`/quote/${encodeURIComponent(order.trackingCode)}`}
                       target="_blank"

@@ -117,27 +117,18 @@ flowchart TD
 
 ---
 
-### GIAI ĐOẠN 3: Chốt Đơn, Thanh Toán Tự Động & Điều Phối Lấy Hàng
+### GIAI ĐOẠN 3: Chốt Đơn, Thanh Toán Tự Động & Điều Phối Lấy Hàng — ✅ ĐÃ TRIỂN KHAI
 > **Mục tiêu**: Gửi lại báo giá hoàn chỉnh cho khách để chốt đơn, thực hiện thanh toán tự động (VietQR / COD) và phát hành Lệnh lấy hàng đầy đủ thông tin.
 
-- [ ] **3.1. Gửi Phiếu Báo Giá & Chốt Đơn cho Khách hàng (Zalo OA / Web)**:
-  - Tin nhắn chốt đơn hiển thị rõ 3 nhóm thông tin:
-    1. **Thông tin khách hàng**: Họ tên, SĐT người gửi & người nhận.
-    2. **Thông tin đơn hàng**: Mã đơn, địa chỉ lấy/giao, loại hàng, trọng lượng tính cước, thời gian dự kiến.
-    3. **Thông tin giá cước**: Tổng cước trọn gói (VNĐ) + chi tiết phụ phí (nếu có).
-  - Kèm nút chọn nhanh: `[✅ Đồng ý chốt đơn]` | `[💬 Thương lượng / Sửa thông tin]`.
-- [ ] **3.2. Kịch bản thương lượng tự động (CTKM 10%)**:
-  - Nếu khách báo giá cao: AI tự động áp dụng mức giảm tối đa 10% (theo chính sách) và mời khách chốt lại. Nếu vẫn từ chối -> Bắn cảnh báo cho CSKH can thiệp.
-- [ ] **3.3. Thủ tục Thanh toán & Đối soát tự động**:
-  - Khi khách đồng ý chốt -> Khách chọn **Chuyển khoản ngay** hoặc **COD (Thanh toán khi lấy/nhận hàng)**.
-  - Nếu chọn Chuyển khoản: Sinh ảnh/link **VietQR động** (đúng số tiền + nội dung mã đơn `VN-LOG-XXXX`).
-  - Tích hợp Webhook đối soát giao dịch ngân hàng (SePAY / Casso): Tự động chuyển trạng thái đơn sang `PAID` ngay khi tiền về tài khoản.
-- [ ] **3.4. Phát hành Thông tin Đơn hàng Điều phối Hoàn chỉnh**:
-  - Ngay sau khi hoàn tất chốt đơn & thanh toán, hệ thống tự động gửi bản tin **Lệnh Điều Phối / Xác Nhận Đơn Chính Thức** tới Khách hàng, DCE Ops và Supplier/Tài xế gồm đầy đủ:
-    * **Giá cước đã chốt & Trạng thái thanh toán** (Đã thanh toán / Thu hộ COD).
-    * **Thời gian lấy hàng** (Khung giờ cam kết).
-    * **Địa điểm lấy hàng** & **Địa điểm giao hàng** (Chuẩn xác đến Phường/Xã, số nhà).
-    * **Contact người lấy hàng / người gửi / người nhận** (Tên + SĐT liên hệ trực tiếp).
+- [x] **3.1. Gửi Phiếu Báo Giá & Chốt Đơn cho Khách hàng (Zalo OA / Web)**:
+  - Tin nhắn chốt đơn hiển thị rõ 3 nhóm thông tin (Thông tin khách hàng, Chi tiết đơn hàng, Giá cước trọn gói) kèm hướng dẫn chốt đơn (`Đồng ý` / `Chốt đơn`).
+- [x] **3.2. Kịch bản thương lượng tự động (CTKM 10%)**:
+  - Xử lý tự động trong hội thoại Zalo OA (`handleCustomerNegotiationOrClosing`): Nếu khách báo giá cao, tự động giảm 10% (1 lần duy nhất) và lưu vào DB; nếu tiếp tục từ chối sẽ tự động bắn cảnh báo cho DCE Ops can thiệp.
+- [x] **3.3. Thủ tục Thanh toán & Đối soát tự động**:
+  - Trang Mobile Checkout `GET /pay/:trackingCode` sinh ảnh **VietQR động** (cấu hình STK trên Web UI `/api/config/payment`) kèm nút chọn **COD**.
+  - Webhook đối soát giao dịch ngân hàng (`POST /api/payment/vietqr-webhook` hỗ trợ SePAY / Casso) tự động nhận diện mã `VN-LOG-...` trong nội dung chuyển khoản và chuyển trạng thái thanh toán thành `paid`.
+- [x] **3.4. Phát hành Thông tin Đơn hàng Điều phối Hoàn chỉnh**:
+  - Hàm `generateDispatchOrderText` & `completeOrderPaymentAndDispatch`: Tự động gửi bản tin **Lệnh Điều Phối Lấy Hàng Chính Thức** (giá chốt, trạng thái thanh toán, thời gian lấy hàng, địa điểm lấy/giao, contact người gửi/nhận) tới Khách hàng, DCE Ops và Nhà cung cấp mặc định (`Dichung Express`).
 
 ---
 
@@ -172,7 +163,7 @@ flowchart TD
 | **Giai đoạn 0** | Chat Zalo OA, PostgreSQL, VPS CI/CD, Bắn đơn DCE Ops (`0934691766`) | Cực cao | **Hoàn thành** | Đã vận hành |
 | **Giai đoạn 1** | Động cơ Bảng giá chuẩn (`Pricing Engine`), Quy đổi trọng lượng & Cấu hình động Ops/Supplier | Cao | **Hoàn thành** | Đã vận hành |
 | **Giai đoạn 2** | Chuyển đơn ngoại lệ cho Ops + Default Supplier, Quick Quote Portal (`/quote/:code`) & `#baogia` | Cao | **Hoàn thành** | Đã vận hành |
-| **Giai đoạn 3** | Phiếu chốt đơn, VietQR tự động & Gửi thông tin điều phối lấy hàng | Cao | Chưa làm | 2 - 3 ngày |
+| **Giai đoạn 3** | Phiếu chốt đơn, Thương lượng 10%, VietQR động (`/pay/:code`) & Lệnh điều phối lấy hàng | Cao | **Hoàn thành** | Đã vận hành |
 | **Giai đoạn 4** | Asterisk IVR chào + Webhook CallerID + Zalo ZNS/OA khởi động collect đơn | Trung bình | Chưa làm | 2 - 3 ngày |
 
 ---

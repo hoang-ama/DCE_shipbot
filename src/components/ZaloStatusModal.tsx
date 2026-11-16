@@ -78,6 +78,10 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
   const [supplierNameInput, setSupplierNameInput] = useState('Dichung Express');
   const [supplierPhoneInput, setSupplierPhoneInput] = useState('0906106066');
   const [isSavingRouting, setIsSavingRouting] = useState(false);
+  const [bankIdInput, setBankIdInput] = useState('MB');
+  const [accountNoInput, setAccountNoInput] = useState('0934691766');
+  const [accountNameInput, setAccountNameInput] = useState('DI CHUNG EXPRESS');
+  const [isSavingPayment, setIsSavingPayment] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ text: string; isError: boolean } | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'update' | 'database' | 'logs' | 'guide'>('overview');
@@ -102,6 +106,16 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
       if (onStatusUpdate) {
         onStatusUpdate(json.connected);
       }
+
+      // Fetch VietQR Bank configuration
+      fetch('/api/config/payment')
+        .then((r) => r.json())
+        .then((pay) => {
+          if (pay?.bankId) setBankIdInput(pay.bankId);
+          if (pay?.accountNo) setAccountNoInput(pay.accountNo);
+          if (pay?.accountName) setAccountNameInput(pay.accountName);
+        })
+        .catch(() => {});
     } catch (err: any) {
       console.error('Failed to fetch Zalo status:', err);
     } finally {
@@ -135,6 +149,33 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
       setActionMessage({ text: `Lỗi kết nối: ${err?.message}`, isError: true });
     } finally {
       setIsSavingRouting(false);
+    }
+  };
+
+  const handleSavePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingPayment(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch('/api/config/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bankId: bankIdInput.trim(),
+          accountNo: accountNoInput.trim(),
+          accountName: accountNameInput.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setActionMessage({ text: json.message || 'Đã lưu cấu hình tài khoản ngân hàng VietQR!', isError: false });
+      } else {
+        setActionMessage({ text: json.error || 'Không thể lưu cấu hình thanh toán', isError: true });
+      }
+    } catch (err: any) {
+      setActionMessage({ text: `Lỗi kết nối: ${err?.message}`, isError: true });
+    } finally {
+      setIsSavingPayment(false);
     }
   };
 
@@ -584,6 +625,67 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
                     className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0"
                   >
                     {isSavingRouting ? 'Đang lưu...' : 'Lưu cấu hình'}
+                  </button>
+                </div>
+              </form>
+
+              {/* Cấu hình Tài khoản Ngân hàng VietQR */}
+              <form onSubmit={handleSavePayment} className="p-4 bg-emerald-50/50 border border-emerald-200 rounded-xl space-y-3">
+                <div>
+                  <h4 className="text-xs font-bold text-emerald-950">
+                    Cấu hình Tài khoản Ngân hàng Thanh toán (VietQR Động)
+                  </h4>
+                  <p className="text-[10.5px] text-emerald-800/80">
+                    Dùng để sinh mã QR chuyển khoản tự động kèm mã vận đơn khi khách chốt đơn
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="block text-[10.5px] font-semibold text-slate-600 mb-1">
+                      Mã Ngân hàng (MB, VCB, TCB...)
+                    </label>
+                    <input
+                      type="text"
+                      value={bankIdInput}
+                      onChange={(e) => setBankIdInput(e.target.value)}
+                      placeholder="MB"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg font-mono uppercase focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10.5px] font-semibold text-slate-600 mb-1">
+                      Số tài khoản nhận tiền
+                    </label>
+                    <input
+                      type="text"
+                      value={accountNoInput}
+                      onChange={(e) => setAccountNoInput(e.target.value)}
+                      placeholder="0934691766"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10.5px] font-semibold text-slate-600 mb-1">
+                      Tên chủ tài khoản
+                    </label>
+                    <input
+                      type="text"
+                      value={accountNameInput}
+                      onChange={(e) => setAccountNameInput(e.target.value)}
+                      placeholder="DI CHUNG EXPRESS"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg uppercase focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={isSavingPayment}
+                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0"
+                  >
+                    {isSavingPayment ? 'Đang lưu...' : 'Lưu tài khoản VietQR'}
                   </button>
                 </div>
               </form>

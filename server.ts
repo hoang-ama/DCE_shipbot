@@ -2931,6 +2931,17 @@ let defaultSupplierUserId: string = process.env.DEFAULT_SUPPLIER_ZALO_USER_ID ||
 // Bảng giá chuẩn đang hoạt động (khôi phục từ DB hoặc mặc định)
 let activeStandardRoutes: StandardPriceRoute[] = [...DEFAULT_STANDARD_ROUTES];
 
+// Cấu hình Tài khoản Ngân hàng VietQR (có thể chỉnh sửa trên giao diện Web UI)
+let paymentBankId: string = process.env.VIETQR_BANK_ID || 'MB';
+let paymentAccountNo: string = process.env.VIETQR_ACCOUNT_NO || '0934691766';
+let paymentAccountName: string = process.env.VIETQR_ACCOUNT_NAME || 'DI CHUNG EXPRESS';
+const PAYMENT_WEBHOOK_SECRET: string = process.env.PAYMENT_WEBHOOK_SECRET || '';
+
+function buildVietQrUrl(amountVnd: number, trackingCode: string): string {
+  const amt = Math.max(1000, Math.round(amountVnd || 0));
+  return `https://img.vietqr.io/image/${encodeURIComponent(paymentBankId)}-${encodeURIComponent(paymentAccountNo)}-compact2.png?amount=${amt}&addInfo=${encodeURIComponent(trackingCode)}&accountName=${encodeURIComponent(paymentAccountName)}`;
+}
+
 // PostgreSQL persistent storage (SURVIVES ALL RENDER RESTARTS & DEPLOYMENTS!)
 let dbPool: pg.Pool | null = null;
 if (process.env.DATABASE_URL) {
@@ -3018,6 +3029,11 @@ export interface OrderRecordDB {
   quotedBy?: string;
   quotedAt?: string;
   quoteNote?: string;
+  paymentMethod?: 'vietqr' | 'cod';
+  paymentStatus?: 'unpaid' | 'pending' | 'paid' | 'cod_pending';
+  paidAt?: string;
+  paymentRef?: string;
+  negotiationUsed?: boolean;
   source: 'web' | 'zalo';
   shippingInfo: any;
 }
@@ -3368,6 +3384,11 @@ async function initDatabaseAndRestore() {
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS quoted_by VARCHAR(100);
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS quoted_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS quote_note TEXT;
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(30);
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(30) DEFAULT 'unpaid';
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS payment_ref VARCHAR(150);
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS negotiation_used BOOLEAN DEFAULT FALSE;
       CREATE INDEX IF NOT EXISTS idx_crm_messages_user_id ON crm_messages(user_id);
       CREATE INDEX IF NOT EXISTS idx_crm_customers_last_interaction ON crm_customers(last_interaction DESC);
       CREATE INDEX IF NOT EXISTS idx_shipping_orders_created_at ON shipping_orders(created_at DESC);
@@ -3457,6 +3478,11 @@ async function initDatabaseAndRestore() {
         quotedBy: r.quoted_by || undefined,
         quotedAt: r.quoted_at ? new Date(r.quoted_at).toISOString() : undefined,
         quoteNote: r.quote_note || undefined,
+        paymentMethod: r.payment_method || undefined,
+        paymentStatus: r.payment_status || 'unpaid',
+        paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : undefined,
+        paymentRef: r.payment_ref || undefined,
+        negotiationUsed: Boolean(r.negotiation_used),
         source: (r.source as 'web' | 'zalo') || 'web',
         shippingInfo: r.shipping_info,
       });
@@ -3465,9 +3491,9 @@ async function initDatabaseAndRestore() {
       console.log(`[Database] Successfully restored ${ordRes.rows.length} shipping orders from PostgreSQL!`);
     }
 
-    // 6. Restore DCE Ops & Default Supplier Configuration from PostgreSQL
+    // 6. Restore DCE Ops, Default Supplier & Payment Bank Configuration from PostgreSQL
     try {
-      const settingsRes = await dbPool.query(`SELECT key, value FROM bot_settings WHERE key IN ('dce_ops_phone', 'dce_ops_user_id', 'default_supplier_name', 'default_supplier_phone', 'default_supplier_user_id')`);
+      const settingsRes = await dbPool.query(`SELECT key, value FROM bot_settings WHERE key IN ('dce_ops_phone', 'dce_ops_user_id', 'default_supplier_name', 'default_supplier_phone', 'default_supplier_user_id', 'payment_bank_id', 'payment_account_no', 'payment_account_name')`);
       const settingsMap = new Map<string, string>();
       for (const row of settingsRes.rows) {
         if (row.value) settingsMap.set(row.key, row.value);
@@ -3478,6 +3504,9 @@ async function initDatabaseAndRestore() {
       if (settingsMap.get('default_supplier_name')) defaultSupplierName = settingsMap.get('default_supplier_name')!;
       if (settingsMap.get('default_supplier_phone')) defaultSupplierPhone = settingsMap.get('default_supplier_phone')!;
       if (settingsMap.get('default_supplier_user_id')) defaultSupplierUserId = settingsMap.get('default_supplier_user_id')!;
+      if (settingsMap.get('payment_bank_id')) paymentBankId = settingsMap.get('payment_bank_id')!;
+      if (settingsMap.get('payment_account_no')) paymentAccountNo = settingsMap.get('payment_account_no')!;
+      if (settingsMap.get('payment_account_name')) paymentAccountName = settingsMap.get('payment_account_name')!;
 
       if (!dceOpsUserId && dceOpsPhone) {
         const tailOps = dceOpsPhone.replace(/\D/g, '').slice(-9);
@@ -4042,6 +4071,184 @@ async function applyOrderQuote(params: {
   };
 }
 
+// Tạo bản tin Lệnh Điều Phối / Xác nhận đơn hàng chính thức (Bước 3.4) gửi Khách, Ops & Supplier
+export function generateDispatchOrderText(order: OrderRecordDB): string {
+  const sAddr = order.shippingInfo?.sender?.address || '(Chưa có)';
+  const rAddr = order.shippingInfo?.receiver?.address || '(Chưa có)';
+  const sContact = [order.shippingInfo?.sender?.name || order.customerName, order.shippingInfo?.sender?.phone || order.customerPhone].filter(Boolean).join(' - ') || '(Đang cập nhật)';
+  const rContact = [order.shippingInfo?.receiver?.name, order.shippingInfo?.receiver?.phone].filter(Boolean).join(' - ') || '(Đang cập nhật)';
+  const cargoName = order.shippingInfo?.cargo?.name || 'Hàng hóa';
+  const weight = order.shippingInfo?.cargo?.weight || (order.shippingInfo?.cargo?.weightKg ? `${order.shippingInfo.cargo.weightKg}kg` : 'Theo thực tế');
+  const deliveryTime = order.shippingInfo?.deliveryTime || 'Theo thỏa thuận';
+  const priceStr = order.estimatedPrice ? formatVnd(order.estimatedPrice) : 'Theo thỏa thuận';
+  const paymentStr =
+    order.paymentStatus === 'paid'
+      ? `✅ ĐÃ THANH TOÁN (Chuyển khoản VietQR${order.paymentRef ? ` - Mã GD: ${order.paymentRef}` : ''})`
+      : '💵 THU HỘ COD / TIỀN MẶT KHI LẤY & GIAO HÀNG';
+
+  return `🚀 [ĐI CHUNG EXPRESS - LỆNH ĐIỀU PHỐI LẤY HÀNG CHÍNH THỨC]
+📋 Mã vận đơn: ${order.trackingCode}
+---------------------------------------------
+💰 GIÁ CƯỚC ĐÃ CHỐT: ${priceStr}
+💳 THANH TOÁN: ${paymentStr}
+
+⏰ THỜI GIAN LẤY HÀNG CAM KẾT:
+   ${deliveryTime}
+
+📍 ĐỊA ĐIỂM LẤY HÀNG:
+   ${sAddr}
+   👤 Contact người gửi/lấy: ${sContact}
+
+🎯 ĐỊA ĐIỂM GIAO HÀNG:
+   ${rAddr}
+   👤 Contact người nhận: ${rContact}
+
+📦 HÀNG HÓA: ${cargoName} (${weight})${order.shippingInfo?.cargo?.specialNotes ? `\n📝 Ghi chú: ${order.shippingInfo.cargo.specialNotes}` : ''}
+---------------------------------------------
+📞 Hotline Điều phối DCE Ops: ${dceOpsPhone}
+✨ Cảm ơn Quý khách & Đối tác đã đồng hành cùng Đi Chung Express!`;
+}
+
+// Hoàn tất thanh toán (VietQR / COD) & Phát hành Lệnh Điều Phối tới Khách, Ops & Supplier
+async function completeOrderPaymentAndDispatch(params: {
+  codeOrSuffix: string;
+  method: 'vietqr' | 'cod';
+  paymentRef?: string;
+}): Promise<{
+  success: boolean;
+  order?: OrderRecordDB;
+  dispatchText?: string;
+  error?: string;
+}> {
+  const order = await findOrderByTrackingCodeOrSuffix(params.codeOrSuffix);
+  if (!order) {
+    return { success: false, error: `Không tìm thấy đơn hàng ${params.codeOrSuffix}` };
+  }
+
+  const isPaid = params.method === 'vietqr';
+  order.status = 'dispatched';
+  order.paymentMethod = params.method;
+  order.paymentStatus = isPaid ? 'paid' : 'cod_pending';
+  order.paidAt = isPaid ? new Date().toISOString() : undefined;
+  order.paymentRef = params.paymentRef || (isPaid ? `VQR-${Date.now().toString().slice(-6)}` : undefined);
+
+  const idx = inMemoryOrders.findIndex((o) => o.id === order.id);
+  if (idx >= 0) inMemoryOrders[idx] = order;
+
+  if (dbPool) {
+    try {
+      await dbPool.query(
+        `UPDATE shipping_orders
+         SET status = 'dispatched',
+             payment_method = $1,
+             payment_status = $2,
+             paid_at = $3,
+             payment_ref = $4
+         WHERE tracking_code = $5`,
+        [order.paymentMethod, order.paymentStatus, order.paidAt || null, order.paymentRef || null, order.trackingCode]
+      );
+    } catch (e: any) {
+      console.error('[Payment/Dispatch] DB update failed:', e?.message);
+    }
+  }
+
+  const dispatchText = generateDispatchOrderText(order);
+
+  // 1. Gửi cho Khách hàng (nếu có zaloUserId)
+  const targetCustomerId =
+    order.zaloUserId ||
+    (order.id.startsWith('zalo-ord-') ? order.id.split('-')[2] : undefined);
+  if (targetCustomerId) {
+    sendZaloOAReply(targetCustomerId, dispatchText)
+      .then((ok) => {
+        if (ok) recordCrmInteraction(targetCustomerId, 'bot', dispatchText, order.shippingInfo, 'Lệnh Điều Phối Lấy Hàng');
+      })
+      .catch(() => {});
+  }
+
+  // 2. Gửi cho DCE Ops
+  if (dceOpsUserId) {
+    sendZaloOAReply(dceOpsUserId, dispatchText).catch(() => {});
+  }
+
+  // 3. Gửi cho Nhà cung cấp mặc định (Dichung Express)
+  if (defaultSupplierUserId && defaultSupplierUserId !== dceOpsUserId) {
+    sendZaloOAReply(defaultSupplierUserId, dispatchText).catch(() => {});
+  }
+
+  logZaloEvent('outgoing_reply', `Phát hành Lệnh Điều Phối đơn ${order.trackingCode} (${isPaid ? 'Đã TT VietQR' : 'COD'})`, {
+    trackingCode: order.trackingCode,
+    paymentStatus: order.paymentStatus,
+    paymentRef: order.paymentRef,
+  });
+
+  return { success: true, order, dispatchText };
+}
+
+// Xử lý tương tác Thương lượng 10% / Chốt đơn / Chọn phương thức thanh toán trên Zalo OA
+async function handleCustomerClosingWorkflow(userId: string, userText: string): Promise<string | null> {
+  const t = userText.trim().toLowerCase();
+  const activeOrder = inMemoryOrders.find(
+    (o) =>
+      (o.zaloUserId === userId || o.id.includes(userId)) &&
+      ['created', 'quoting', 'quoted', 'confirmed'].includes(o.status)
+  );
+  if (!activeOrder || !activeOrder.estimatedPrice || activeOrder.estimatedPrice <= 0) {
+    return null;
+  }
+
+  const publicBaseUrl = (process.env.PUBLIC_BASE_URL || 'https://ai.dichung.vn').replace(/\/+$/, '');
+  const payUrl = `${publicBaseUrl}/pay/${encodeURIComponent(activeOrder.trackingCode)}`;
+
+  // 1. Khách chọn thanh toán COD / Tiền mặt
+  if (activeOrder.status === 'confirmed' && /^(?:cod|tiền\s*mặt|tien\s*mat|thu\s*hộ|trả\s*sau)/i.test(t)) {
+    const res = await completeOrderPaymentAndDispatch({ codeOrSuffix: activeOrder.trackingCode, method: 'cod' });
+    if (res.success && res.dispatchText) {
+      return `Dạ em đã ghi nhận hình thức thanh toán **COD (Tiền mặt)** cho đơn ${activeOrder.trackingCode} rồi ạ!\n\n${res.dispatchText}`;
+    }
+  }
+
+  // 2. Khách chọn chuyển khoản VietQR
+  if (activeOrder.status === 'confirmed' && /(?:chuyển\s*khoản|vietqr|qr|ck|trả\s*trước)/i.test(t)) {
+    return `Dạ anh/chị vui lòng quét mã QR hoặc chuyển khoản theo thông tin dưới đây để hoàn tất đơn **${activeOrder.trackingCode}** ạ:\n\n🏦 Ngân hàng: ${paymentBankId}\n💳 Số tài khoản: ${paymentAccountNo}\n👤 Chủ tài khoản: ${paymentAccountName}\n💰 Số tiền: ${formatVnd(activeOrder.estimatedPrice)}\n📝 Nội dung CK: ${activeOrder.trackingCode}\n\n🔗 Bấm vào đây để mở mã QR thanh toán nhanh: ${payUrl}\n\n*(Hoặc nhắn **COD** nếu anh/chị muốn thanh toán tiền mặt khi lấy/nhận hàng ạ)*`;
+  }
+
+  // 3. Khách đồng ý / Chốt đơn (khi đơn đang ở trạng thái quoted hoặc created có giá)
+  if (/^(?:đồng\s*ý|chốt\s*đơn|ok\s*chốt|chốt\s*nhé|ok\s*em|lên\s*đơn\s*đi|xác\s*nhận\s*đơn)/i.test(t) && activeOrder.status !== 'confirmed') {
+    activeOrder.status = 'confirmed';
+    if (dbPool) {
+      dbPool.query(`UPDATE shipping_orders SET status = 'confirmed' WHERE tracking_code = $1`, [activeOrder.trackingCode]).catch(() => {});
+    }
+    return `🎉 Dạ em đã chốt đơn **${activeOrder.trackingCode}** với giá trọn gói **${formatVnd(activeOrder.estimatedPrice)}** rồi ạ!\n\nAnh/chị vui lòng chọn hình thức thanh toán:\n1️⃣ **Chuyển khoản VietQR**: Mở link QR thanh toán nhanh tại ${payUrl}\n2️⃣ **Thanh toán COD / Tiền mặt**: Nhắn chữ **COD** để bên em lên lệnh điều tài xế qua lấy hàng ngay ạ!`;
+  }
+
+  // 4. Khách chê đắt / Thương lượng giá -> Áp dụng CTKM giảm 10% lần 1, lần 2 chuyển CSKH
+  if (/(?:đắt|mắc|giá\s*cao|giảm\s*giá|bớt\s*(?:đi|chút|không)|thương\s*lượng|ưu\s*đãi)/i.test(t)) {
+    if (!activeOrder.negotiationUsed) {
+      const discountedPrice = Math.round((activeOrder.estimatedPrice * 0.9) / 1000) * 1000;
+      activeOrder.estimatedPrice = discountedPrice;
+      activeOrder.negotiationUsed = true;
+      if (dbPool) {
+        dbPool.query(
+          `UPDATE shipping_orders SET customer_quote_vnd = $1, negotiation_used = TRUE WHERE tracking_code = $2`,
+          [discountedPrice, activeOrder.trackingCode]
+        ).catch(() => {});
+      }
+      return `Dạ bên em rất mong được phục vụ chuyến hàng này cho anh/chị. Em xin phép áp dụng **Ưu đãi giảm trực tiếp 10%** cho đơn **${activeOrder.trackingCode}**, giá trọn gói chỉ còn **${formatVnd(discountedPrice)}** ạ.\n\nAnh/chị nhắn **"Đồng ý"** hoặc **"Chốt đơn"** để em lên lệnh lấy hàng ngay cho mình nhé!`;
+    } else {
+      if (dceOpsUserId) {
+        sendZaloOAReply(
+          dceOpsUserId,
+          `⚠️ [CẦN CSKH CAN THIỆP] Khách hàng đơn ${activeOrder.trackingCode} (${activeOrder.customerName || userId}) vẫn đang thương lượng thêm sau khi đã giảm 10% (${formatVnd(activeOrder.estimatedPrice)}). Vui lòng hỗ trợ trực tiếp!`
+        ).catch(() => {});
+      }
+      return `Dạ đơn hàng **${activeOrder.trackingCode}** của mình có tính chất đặc thù, em đã chuyển thông tin tới chuyên viên điều phối (${dceOpsPhone}) để hỗ trợ mức giá tốt nhất cho anh/chị ngay đây ạ!`;
+    }
+  }
+
+  return null;
+}
+
 // API Route: Chủ động gửi phiếu vận đơn sang Zalo cho khách hàng
 app.post('/api/zalo/send-order-bill', async (req: Request, res: Response) => {
   const { userId, shippingInfo, trackingCode } = req.body || {};
@@ -4526,6 +4733,18 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
         return;
       }
 
+      // Kiểm tra xem khách hàng có đang chốt đơn, thương lượng giảm 10% hay chọn hình thức thanh toán (VietQR / COD) không
+      const closingReply = await handleCustomerClosingWorkflow(userId, userText);
+      if (closingReply) {
+        session.history.push({ role: 'user', content: userText });
+        session.history.push({ role: 'model', content: closingReply });
+        session.lastActive = Date.now();
+        saveSessionsCache();
+        await sendZaloOAReply(userId, closingReply);
+        await recordCrmInteraction(userId, 'bot', closingReply, session.currentInfo);
+        return;
+      }
+
       // Run EXACT same intelligence pipeline as Web UI with full history and currentInfo!
       const result = await processChatPipeline(userText, session.history, session.currentInfo);
 
@@ -4674,7 +4893,7 @@ app.get('/api/orders', async (_req: Request, res: Response) => {
   if (dbPool) {
     try {
       const result = await dbPool.query(`
-        SELECT id, tracking_code, created_at, status, customer_name, customer_phone, zalo_user_id, base_cost_vnd, customer_quote_vnd, quoted_by, quoted_at, quote_note, source, shipping_info
+        SELECT id, tracking_code, created_at, status, customer_name, customer_phone, zalo_user_id, base_cost_vnd, customer_quote_vnd, quoted_by, quoted_at, quote_note, payment_method, payment_status, paid_at, payment_ref, negotiation_used, source, shipping_info
         FROM shipping_orders
         ORDER BY created_at DESC
         LIMIT 100
@@ -4692,6 +4911,11 @@ app.get('/api/orders', async (_req: Request, res: Response) => {
         quotedBy: r.quoted_by || undefined,
         quotedAt: r.quoted_at ? new Date(r.quoted_at).toISOString() : undefined,
         quoteNote: r.quote_note || undefined,
+        paymentMethod: r.payment_method || undefined,
+        paymentStatus: r.payment_status || 'unpaid',
+        paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : undefined,
+        paymentRef: r.payment_ref || undefined,
+        negotiationUsed: Boolean(r.negotiation_used),
         source: r.source,
         shippingInfo: r.shipping_info,
       }));
@@ -4723,6 +4947,216 @@ app.post('/api/orders/:trackingCode/quote', async (req: Request, res: Response) 
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err?.message });
   }
+});
+
+// GET /api/config/payment - Lấy cấu hình Ngân hàng VietQR
+app.get('/api/config/payment', (_req: Request, res: Response) => {
+  return res.json({
+    bankId: paymentBankId,
+    accountNo: paymentAccountNo,
+    accountName: paymentAccountName,
+  });
+});
+
+// POST /api/config/payment - Cập nhật cấu hình Ngân hàng VietQR từ Web UI
+app.post('/api/config/payment', async (req: Request, res: Response) => {
+  const { bankId, accountNo, accountName } = req.body || {};
+  if (typeof bankId === 'string' && bankId.trim()) paymentBankId = bankId.trim().toUpperCase();
+  if (typeof accountNo === 'string' && accountNo.trim()) paymentAccountNo = accountNo.trim();
+  if (typeof accountName === 'string' && accountName.trim()) paymentAccountName = accountName.trim().toUpperCase();
+
+  if (dbPool) {
+    try {
+      const pairs: Array<[string, string]> = [
+        ['payment_bank_id', paymentBankId],
+        ['payment_account_no', paymentAccountNo],
+        ['payment_account_name', paymentAccountName],
+      ];
+      for (const [k, v] of pairs) {
+        await dbPool.query(
+          `INSERT INTO bot_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();`,
+          [k, v]
+        );
+      }
+    } catch (e: any) {
+      console.error('[API /api/config/payment] DB save error:', e?.message);
+    }
+  }
+
+  return res.json({
+    success: true,
+    bankId: paymentBankId,
+    accountNo: paymentAccountNo,
+    accountName: paymentAccountName,
+    message: 'Đã lưu cấu hình tài khoản ngân hàng VietQR thành công!',
+  });
+});
+
+// POST /api/orders/:trackingCode/payment - Xác nhận thanh toán (VietQR / COD) & Phát hành Lệnh Điều Phối
+app.post('/api/orders/:trackingCode/payment', async (req: Request, res: Response) => {
+  try {
+    const { trackingCode } = req.params;
+    const { method, paymentRef } = req.body || {};
+    const resolvedMethod = method === 'cod' ? 'cod' : 'vietqr';
+    const result = await completeOrderPaymentAndDispatch({
+      codeOrSuffix: trackingCode,
+      method: resolvedMethod,
+      paymentRef,
+    });
+    if (!result.success) {
+      return res.status(404).json(result);
+    }
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message });
+  }
+});
+
+// POST /api/payment/vietqr-webhook - Webhook đối soát tự động từ SePAY / Casso / Ngân hàng
+app.post('/api/payment/vietqr-webhook', async (req: Request, res: Response) => {
+  try {
+    if (PAYMENT_WEBHOOK_SECRET) {
+      const incomingSecret = req.headers['x-api-key'] || req.headers['authorization'] || req.query.secret;
+      if (String(incomingSecret || '').replace(/^Bearer\s+/i, '') !== PAYMENT_WEBHOOK_SECRET) {
+        return res.status(401).json({ success: false, error: 'Invalid webhook secret' });
+      }
+    }
+
+    const body = req.body || {};
+    // Hỗ trợ chuẩn payload của SePAY (content, transferAmount, referenceCode) hoặc Casso (data[].description, amount)
+    const txList = Array.isArray(body.data) ? body.data : [body];
+    const processed: string[] = [];
+
+    for (const tx of txList) {
+      const content = String(tx.content || tx.description || tx.remark || '').toUpperCase();
+      const refCode = String(tx.referenceCode || tx.id || tx.tid || `BANK-${Date.now().toString().slice(-6)}`);
+      const codeMatch = content.match(/VN-LOG-\d{4}-\d{4}/i) || content.match(/VNLOG\d{8}/i);
+      if (codeMatch) {
+        let code = codeMatch[0].toUpperCase();
+        if (code.startsWith('VNLOG')) {
+          code = `VN-LOG-${code.slice(5, 9)}-${code.slice(9, 13)}`;
+        }
+        const dispatchRes = await completeOrderPaymentAndDispatch({
+          codeOrSuffix: code,
+          method: 'vietqr',
+          paymentRef: refCode,
+        });
+        if (dispatchRes.success) {
+          processed.push(code);
+        }
+      }
+    }
+
+    return res.json({ success: true, processed });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message });
+  }
+});
+
+// GET /pay/:trackingCode - Trang Thanh toán VietQR Động & Chốt COD tối ưu cho Mobile
+app.get('/pay/:trackingCode', async (req: Request, res: Response) => {
+  const { trackingCode } = req.params;
+  const order = await findOrderByTrackingCodeOrSuffix(trackingCode);
+  if (!order) {
+    return res.status(404).send(`
+      <!DOCTYPE html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Không tìm thấy đơn</title></head>
+      <body style="font-family:sans-serif;padding:32px;text-align:center;background:#f8fafc;">
+        <h2>❌ Không tìm thấy đơn hàng ${trackingCode}</h2>
+      </body></html>
+    `);
+  }
+
+  const amount = order.estimatedPrice || 0;
+  const qrUrl = buildVietQrUrl(amount, order.trackingCode);
+  const sAddr = order.shippingInfo?.sender?.address || '(Chưa có)';
+  const rAddr = order.shippingInfo?.receiver?.address || '(Chưa có)';
+  const sContact = [order.shippingInfo?.sender?.name || order.customerName, order.shippingInfo?.sender?.phone || order.customerPhone].filter(Boolean).join(' - ') || '(Chưa có)';
+  const cargo = order.shippingInfo?.cargo?.name || 'Hàng hóa';
+  const isAlreadyDone = order.status === 'dispatched' || order.paymentStatus === 'paid' || order.paymentStatus === 'cod_pending';
+
+  return res.send(`
+    <!DOCTYPE html>
+    <html lang="vi">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Thanh Toán Đơn ${order.trackingCode} | Đi Chung Express</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f1f5f9; margin: 0; padding: 16px; color: #0f172a; }
+        .card { max-width: 460px; margin: 0 auto; background: #fff; border-radius: 18px; box-shadow: 0 12px 30px rgba(15,23,42,0.08); overflow: hidden; border: 1px solid #e2e8f0; }
+        .header { background: linear-gradient(135deg, #059669, #0d9488); color: #fff; padding: 20px; text-align: center; }
+        .body { padding: 20px; }
+        .amount { font-size: 28px; font-weight: 900; color: #059669; text-align: center; margin: 6px 0 14px; }
+        .qr-box { text-align: center; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 14px; padding: 14px; margin-bottom: 16px; }
+        .qr-box img { max-width: 240px; width: 100%; border-radius: 10px; }
+        .info { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.6; margin-bottom: 16px; }
+        .btn { width: 100%; border: none; padding: 13px; border-radius: 12px; font-size: 14px; font-weight: 700; cursor: pointer; margin-bottom: 8px; }
+        .btn-primary { background: #059669; color: #fff; }
+        .btn-cod { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+        .status-done { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 14px; border-radius: 12px; text-align: center; font-weight: 700; margin-bottom: 14px; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="header">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.5px;opacity:0.9;">ĐI CHUNG EXPRESS — THANH TOÁN ĐƠN HÀNG</div>
+          <h2 style="margin:6px 0 0;font-size:20px;">${order.trackingCode}</h2>
+        </div>
+        <div class="body">
+          ${isAlreadyDone ? `<div class="status-done">${order.paymentStatus === 'paid' ? '✅ ĐÃ THANH TOÁN VIETQR & PHÁT LỆNH LẤY HÀNG' : '✅ ĐÃ CHỐT THANH TOÁN COD & PHÁT LỆNH LẤY HÀNG'}</div>` : ''}
+          <div style="text-align:center;font-size:12px;color:#64748b;">Tổng cước thanh toán</div>
+          <div class="amount">${amount > 0 ? formatVnd(amount) : 'Chờ báo giá'}</div>
+
+          ${amount > 0 ? `
+          <div class="qr-box">
+            <img src="${qrUrl}" alt="VietQR ${order.trackingCode}" />
+            <div style="font-size:12px;color:#334155;margin-top:8px;">
+              <strong>${paymentBankId}</strong> • STK: <strong>${paymentAccountNo}</strong><br/>
+              Chủ TK: <strong>${paymentAccountName}</strong><br/>
+              Nội dung CK: <strong style="color:#059669;">${order.trackingCode}</strong>
+            </div>
+          </div>` : ''}
+
+          <div class="info">
+            <div><strong>👤 Người gửi/lấy:</strong> ${sContact}</div>
+            <div><strong>📍 Lấy tại:</strong> ${sAddr}</div>
+            <div><strong>🎯 Giao đến:</strong> ${rAddr}</div>
+            <div><strong>📦 Hàng hóa:</strong> ${cargo}</div>
+            <div><strong>⏰ Thời gian:</strong> ${order.shippingInfo?.deliveryTime || 'Theo thỏa thuận'}</div>
+          </div>
+
+          <button class="btn btn-primary" onclick="confirmPayment('vietqr')">✅ Tôi đã chuyển khoản xong (Xác nhận & Lên lệnh)</button>
+          <button class="btn btn-cod" onclick="confirmPayment('cod')">💵 Chọn Thanh toán COD / Tiền mặt khi giao nhận</button>
+          <div id="payMsg" style="margin-top:10px;font-size:13px;text-align:center;"></div>
+        </div>
+      </div>
+
+      <script>
+        async function confirmPayment(method) {
+          const msg = document.getElementById('payMsg');
+          msg.textContent = 'Đang xử lý và phát lệnh điều phối...';
+          try {
+            const res = await fetch('/api/orders/${encodeURIComponent(order.trackingCode)}/payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method })
+            });
+            const data = await res.json();
+            if (data.success) {
+              msg.innerHTML = '<div style="color:#059669;font-weight:700;padding:10px;background:#ecfdf5;border-radius:10px;">🎉 Thành công! Đã phát hành Lệnh Điều Phối tới Khách hàng, DCE Ops & Nhà xe!</div>';
+              setTimeout(() => location.reload(), 1200);
+            } else {
+              msg.textContent = '❌ Lỗi: ' + (data.error || 'Không thể xử lý');
+            }
+          } catch (e) {
+            msg.textContent = '❌ Lỗi kết nối máy chủ';
+          }
+        }
+      </script>
+    </body>
+    </html>
+  `);
 });
 
 // GET /quote/:trackingCode - Cổng Nhập Giá Nhanh (Quick Quote Portal) tối ưu cho Mobile của DCE Ops & Supplier
