@@ -132,27 +132,18 @@ flowchart TD
 
 ---
 
-### GIAI ĐOẠN 4: Tích Hợp Tổng Đài Asterisk VoIP (Chuyển Luồng Sang Zalo OA)
+### GIAI ĐOẠN 4: Tích Hợp Tổng Đài Asterisk VoIP (Chuyển Luồng Sang Zalo OA) — ✅ ĐÃ TRIỂN KHAI
 > **Mục tiêu**: Tự động hóa tiếp nhận khách gọi điện tới Hotline Asterisk mà **không cần dựng Voice Callbot phức tạp**: Tổng đài phát lời chào hẹn liên hệ qua Zalo, cúp máy và kích hoạt ngay phiên chat thu thập đơn hàng trên Zalo OA tới chính số điện thoại khách vừa gọi.
 
-- [ ] **4.1. Cấu hình Kịch bản IVR trên Tổng đài Asterisk**:
-  - Khi có cuộc gọi đến Hotline (VD: `19006022` / `0901778008`):
-    1. Asterisk nhấc máy (`Answer()`).
-    2. Phát file ghi âm lời chào chuẩn thu sẵn (Playback):
-       > *"Cảm ơn quý khách đã gọi tới Đi Chung Express. Hiện tại hệ thống đang xử lý đơn nhanh qua Zalo, nhân viên và trợ lý tự động sẽ nhắn tin ngay vào số Zalo của số điện thoại quý khách vừa gọi để báo giá và lên đơn. Xin cảm ơn!"*
-    3. Gọi Webhook / AGI sang ShipBot kèm `CallerID` (SĐT khách gọi) và `UniqueID` cuộc gọi.
-    4. Tự động cúp máy (`Hangup()`).
-- [ ] **4.2. API Tiếp nhận Cuộc gọi từ Asterisk (`POST /api/asterisk/incoming-call`)**:
-  - Chuẩn hóa số điện thoại `CallerID` (chuyển đầu `+84` / `84` về `09...` và `849...`).
-  - Kiểm tra trùng lặp (chống spam nếu khách gọi nhỡ nhiều lần liên tiếp trong 5 phút).
-  - Lưu lịch sử cuộc gọi vào `shipbot-db` (`asterisk_call_logs`).
-- [ ] **4.3. Gửi Tin nhắn Chào từ Zalo OA tới SĐT Khách hàng**:
-  - **Trường hợp 1 (Khách đã từng tương tác/quan tâm Zalo OA)**:
-    * Tra cứu `user_id` từ bảng `crm_customers` theo SĐT -> Gửi thẳng tin nhắn chào qua **Zalo OA CS API** để bắt đầu hỏi địa chỉ lấy/giao hàng ngay.
-  - **Trường hợp 2 (Khách mới hoàn toàn chưa từng nhắn Zalo OA)**:
-    * *Lưu ý quy định Zalo*: Zalo OA CS API không cho phép nhắn tin trực tiếp lần đầu chỉ bằng SĐT. Hệ thống sẽ gọi **Zalo ZNS (Zalo Notification Service)** bằng Template đã duyệt (VD: *"Chào anh/chị, Đi Chung Express vừa nhận cuộc gọi từ SĐT này. Vui lòng bấm 'Nhắn tin ngay' hoặc trả lời để được tư vấn và báo giá vận chuyển nhanh nhất"*).
-- [ ] **4.4. Khởi động lại luồng Collect Thông tin Đơn hàng**:
-  - Khi khách hàng nhấn nút CTA trên ZNS hoặc nhắn lại bất kỳ nội dung nào vào Zalo OA -> ShipBot tự động nhận diện phiên từ cuộc gọi Asterisk vừa tạo, gửi lời chào thu thập 4 thông tin và chạy xuyên suốt **Giai đoạn 1 $\rightarrow$ 2 $\rightarrow$ 3**.
+- [x] **4.1. Cấu hình Kịch bản IVR trên Tổng đài Asterisk (`ASTERISK_INTEGRATION.md`)**:
+  - Cung cấp sẵn Dialplan `[from-dce-shipbot-ivr]` cho tổng đài Asterisk/FreePBX: `Answer()` $\rightarrow$ `Playback(custom/dce-zalo-greeting)` $\rightarrow$ `curl` Webhook sang ShipBot kèm `${CALLERID(num)}` & `${UNIQUEID}` $\rightarrow$ `Hangup()`.
+- [x] **4.2. API Tiếp nhận Cuộc gọi từ Asterisk (`POST /api/asterisk/incoming-call`, `GET /api/asterisk/calls`)**:
+  - Chuẩn hóa số điện thoại `CallerID` (`09...` / `849...`), chống trùng lặp trong vòng 5 phút, bảo mật tùy chọn `ASTERISK_WEBHOOK_SECRET` và lưu vào bảng PostgreSQL `asterisk_call_logs`.
+- [x] **4.3. Gửi Tin nhắn Chào từ Zalo OA tới SĐT Khách hàng**:
+  - **Khách đã từng tương tác Zalo OA**: Tự động tra cứu `user_id` trong `crm_customers`, gửi thẳng lời chào thu thập đơn hàng qua **Zalo OA CS API**.
+  - **Khách mới chưa từng nhắn OA**: Gửi **Zalo ZNS Template** (cấu hình Template ID ngay trên Web UI `GET/POST /api/config/asterisk`), hoặc tự động báo cho DCE Ops kèm link `https://zalo.me/<SĐT>`.
+- [x] **4.4. Khởi động lại luồng Collect Thông tin Đơn hàng**:
+  - Khi gửi lời chào qua Zalo OA CS API, hệ thống khởi tạo sẵn phiên `zaloUserSessions` kèm SĐT khách (`sender.phone`) để khách trả lời là chạy xuyên suốt **Giai đoạn 1 $\rightarrow$ 2 $\rightarrow$ 3**.
 
 ---
 
@@ -164,7 +155,7 @@ flowchart TD
 | **Giai đoạn 1** | Động cơ Bảng giá chuẩn (`Pricing Engine`), Quy đổi trọng lượng & Cấu hình động Ops/Supplier | Cao | **Hoàn thành** | Đã vận hành |
 | **Giai đoạn 2** | Chuyển đơn ngoại lệ cho Ops + Default Supplier, Quick Quote Portal (`/quote/:code`) & `#baogia` | Cao | **Hoàn thành** | Đã vận hành |
 | **Giai đoạn 3** | Phiếu chốt đơn, Thương lượng 10%, VietQR động (`/pay/:code`) & Lệnh điều phối lấy hàng | Cao | **Hoàn thành** | Đã vận hành |
-| **Giai đoạn 4** | Asterisk IVR chào + Webhook CallerID + Zalo ZNS/OA khởi động collect đơn | Trung bình | Chưa làm | 2 - 3 ngày |
+| **Giai đoạn 4** | Asterisk IVR chào + Webhook CallerID + Zalo ZNS/OA khởi động collect đơn | Trung bình | **Hoàn thành** | Đã vận hành |
 
 ---
 

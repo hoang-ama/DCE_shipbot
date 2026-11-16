@@ -82,6 +82,10 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
   const [accountNoInput, setAccountNoInput] = useState('0934691766');
   const [accountNameInput, setAccountNameInput] = useState('DI CHUNG EXPRESS');
   const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const [znsTemplateIdInput, setZnsTemplateIdInput] = useState('');
+  const [asteriskWebhookUrl, setAsteriskWebhookUrl] = useState('https://ai.dichung.vn/api/asterisk/incoming-call');
+  const [asteriskCalls, setAsteriskCalls] = useState<Array<{ id: string; normalizedPhone: string; channelUsed: string; status: string; createdAt: string }>>([]);
+  const [isSavingAsterisk, setIsSavingAsterisk] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ text: string; isError: boolean } | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'update' | 'database' | 'logs' | 'guide'>('overview');
@@ -114,6 +118,22 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
           if (pay?.bankId) setBankIdInput(pay.bankId);
           if (pay?.accountNo) setAccountNoInput(pay.accountNo);
           if (pay?.accountName) setAccountNameInput(pay.accountName);
+        })
+        .catch(() => {});
+
+      // Fetch Asterisk VoIP & ZNS configuration + recent calls
+      fetch('/api/config/asterisk')
+        .then((r) => r.json())
+        .then((ast) => {
+          if (ast?.webhookUrl) setAsteriskWebhookUrl(ast.webhookUrl);
+          if (typeof ast?.zaloZnsTemplateId === 'string') setZnsTemplateIdInput(ast.zaloZnsTemplateId);
+        })
+        .catch(() => {});
+
+      fetch('/api/asterisk/calls')
+        .then((r) => r.json())
+        .then((resCalls) => {
+          if (Array.isArray(resCalls?.calls)) setAsteriskCalls(resCalls.calls.slice(0, 5));
         })
         .catch(() => {});
     } catch (err: any) {
@@ -176,6 +196,31 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
       setActionMessage({ text: `Lỗi kết nối: ${err?.message}`, isError: true });
     } finally {
       setIsSavingPayment(false);
+    }
+  };
+
+  const handleSaveAsterisk = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingAsterisk(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch('/api/config/asterisk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          zaloZnsTemplateId: znsTemplateIdInput.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setActionMessage({ text: json.message || 'Đã lưu cấu hình Asterisk & Zalo ZNS!', isError: false });
+      } else {
+        setActionMessage({ text: json.error || 'Không thể lưu cấu hình Asterisk', isError: true });
+      }
+    } catch (err: any) {
+      setActionMessage({ text: `Lỗi kết nối: ${err?.message}`, isError: true });
+    } finally {
+      setIsSavingAsterisk(false);
     }
   };
 
@@ -688,6 +733,63 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
                     {isSavingPayment ? 'Đang lưu...' : 'Lưu tài khoản VietQR'}
                   </button>
                 </div>
+              </form>
+
+              {/* Cấu hình Tổng đài Asterisk VoIP & Zalo ZNS */}
+              <form onSubmit={handleSaveAsterisk} className="p-4 bg-indigo-50/50 border border-indigo-200 rounded-xl space-y-3">
+                <div>
+                  <h4 className="text-xs font-bold text-indigo-950">
+                    Tổng đài Asterisk VoIP &amp; Zalo ZNS (Giai đoạn 4)
+                  </h4>
+                  <p className="text-[10.5px] text-indigo-800/80">
+                    Khi khách gọi tổng đài: Asterisk chào &amp; cúp máy &rarr; Webhook tự động nhắn Zalo OA cho khách
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-[10.5px] font-semibold text-slate-600 mb-1">
+                      Webhook URL cấu hình trên Dialplan Asterisk
+                    </label>
+                    <div className="p-1.5 bg-white border border-indigo-200 rounded-lg font-mono text-[10.5px] text-slate-800 break-all select-all">
+                      {asteriskWebhookUrl}
+                    </div>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <label className="block text-[10.5px] font-semibold text-slate-600 mb-1">
+                        Zalo ZNS Template ID (Cho SĐT khách mới chưa từng chat OA)
+                      </label>
+                      <input
+                        type="text"
+                        value={znsTemplateIdInput}
+                        onChange={(e) => setZnsTemplateIdInput(e.target.value)}
+                        placeholder="VD: 318290 (Để trống nếu chỉ dùng OA CS + báo Ops)"
+                        className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={isSavingAsterisk}
+                      className="px-3 py-1.5 bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0"
+                    >
+                      {isSavingAsterisk ? 'Đang lưu...' : 'Lưu ZNS ID'}
+                    </button>
+                  </div>
+                </div>
+
+                {asteriskCalls.length > 0 && (
+                  <div className="pt-2 border-t border-indigo-200/70 space-y-1">
+                    <div className="text-[10.5px] font-bold text-indigo-900">Cuộc gọi Asterisk gần nhất:</div>
+                    {asteriskCalls.map((c) => (
+                      <div key={c.id} className="flex items-center justify-between text-[10.5px] bg-white px-2 py-1 rounded border border-indigo-100">
+                        <span className="font-mono font-bold text-slate-800">{c.normalizedPhone}</span>
+                        <span className="text-indigo-700">{c.channelUsed} ({c.status})</span>
+                        <span className="text-slate-400">{c.createdAt}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </form>
 
               {/* Action buttons */}
