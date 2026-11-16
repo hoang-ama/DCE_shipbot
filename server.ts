@@ -2099,6 +2099,9 @@ export function generateOpsShipmentNotification(
   const senderContact = [sName, sPhone].filter(Boolean).join(' - ');
   const receiverContact = [info?.receiver?.name, info?.receiver?.phone].filter(Boolean).join(' - ');
 
+  const publicBaseUrl = (process.env.PUBLIC_BASE_URL || 'https://ai.dichung.vn').replace(/\/+$/, '');
+  const quoteUrl = `${publicBaseUrl}/quote/${encodeURIComponent(code)}`;
+
   const pricing = calculateDCExpressPriceFromShippingInfo(info, activeStandardRoutes);
   const priceLine = pricing.hasStandardPrice && pricing.recommendedServices[0]
     ? `\n💰 Giá cước chuẩn tham khảo: ${formatVnd(pricing.recommendedServices[0].customerQuoteVnd)} (${pricing.recommendedServices[0].serviceName})`
@@ -2121,6 +2124,8 @@ export function generateOpsShipmentNotification(
 ⏰ THỜI GIAN GIAO NHẬN:
    - ${deliveryTime}${priceLine}
 ---------------------------------------------
+🔗 Nhập giá nhanh 1-Click: ${quoteUrl}
+💬 Hoặc nhắn Zalo: #baogia ${code} [Giá_gốc]
 ⚡ Kính gửi Quý Đối Tác / Nhà Xe (${defaultSupplierName}) báo giá vận chuyển tuyến này giúp Đi Chung Express.
 📞 Hotline Điều phối DCE Ops: ${dceOpsPhone}`;
 }
@@ -3007,6 +3012,12 @@ export interface OrderRecordDB {
   status: string;
   customerName?: string;
   customerPhone?: string;
+  zaloUserId?: string;
+  estimatedPrice?: number;
+  baseCostVnd?: number;
+  quotedBy?: string;
+  quotedAt?: string;
+  quoteNote?: string;
   source: 'web' | 'zalo';
   shippingInfo: any;
 }
@@ -3020,17 +3031,33 @@ async function saveShippingOrder(orderData: {
   status?: string;
   customerName?: string;
   customerPhone?: string;
+  zaloUserId?: string;
+  estimatedPrice?: number;
+  baseCostVnd?: number;
+  quotedBy?: string;
+  quotedAt?: string;
+  quoteNote?: string;
   source?: 'web' | 'zalo';
   shippingInfo: any;
 }): Promise<OrderRecordDB> {
   const id = orderData.id || `order-${Date.now()}`;
   const trackingCode = orderData.trackingCode || generateTrackingCode();
-  const status = orderData.status || 'created';
+  const pricingCheck = calculateDCExpressPriceFromShippingInfo(orderData.shippingInfo, activeStandardRoutes);
+  const autoPrice = pricingCheck.hasStandardPrice && pricingCheck.recommendedServices[0]
+    ? pricingCheck.recommendedServices[0].customerQuoteVnd
+    : undefined;
+  const autoBaseCost = pricingCheck.hasStandardPrice && pricingCheck.recommendedServices[0]
+    ? pricingCheck.recommendedServices[0].baseCostVnd
+    : undefined;
+
+  const status = orderData.status || (pricingCheck.hasStandardPrice ? 'created' : 'quoting');
   const customerName = orderData.customerName || orderData.shippingInfo?.sender?.name || '';
   const customerPhone = orderData.customerPhone || orderData.shippingInfo?.sender?.phone || '';
   const source = orderData.source || 'web';
   const shippingInfo = orderData.shippingInfo;
   const createdAt = new Date().toLocaleString('vi-VN');
+  const estimatedPrice = orderData.estimatedPrice ?? autoPrice;
+  const baseCostVnd = orderData.baseCostVnd ?? autoBaseCost;
 
   const record: OrderRecordDB = {
     id,
@@ -3039,6 +3066,12 @@ async function saveShippingOrder(orderData: {
     status,
     customerName,
     customerPhone,
+    zaloUserId: orderData.zaloUserId,
+    estimatedPrice,
+    baseCostVnd,
+    quotedBy: orderData.quotedBy,
+    quotedAt: orderData.quotedAt,
+    quoteNote: orderData.quoteNote,
     source,
     shippingInfo,
   };
@@ -3053,18 +3086,36 @@ async function saveShippingOrder(orderData: {
   if (dbPool) {
     try {
       await dbPool.query(
-        `INSERT INTO shipping_orders (id, tracking_code, status, customer_name, customer_phone, source, shipping_info, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        `INSERT INTO shipping_orders (id, tracking_code, status, customer_name, customer_phone, zalo_user_id, base_cost_vnd, customer_quote_vnd, quoted_by, quote_note, source, shipping_info, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
          ON CONFLICT (id) DO UPDATE
          SET tracking_code = EXCLUDED.tracking_code,
              status = EXCLUDED.status,
              customer_name = EXCLUDED.customer_name,
              customer_phone = EXCLUDED.customer_phone,
+             zalo_user_id = COALESCE(EXCLUDED.zalo_user_id, shipping_orders.zalo_user_id),
+             base_cost_vnd = COALESCE(EXCLUDED.base_cost_vnd, shipping_orders.base_cost_vnd),
+             customer_quote_vnd = COALESCE(EXCLUDED.customer_quote_vnd, shipping_orders.customer_quote_vnd),
+             quoted_by = COALESCE(EXCLUDED.quoted_by, shipping_orders.quoted_by),
+             quote_note = COALESCE(EXCLUDED.quote_note, shipping_orders.quote_note),
              source = EXCLUDED.source,
              shipping_info = EXCLUDED.shipping_info;`,
-        [id, trackingCode, status, customerName, customerPhone, source, JSON.stringify(shippingInfo)]
+        [
+          id,
+          trackingCode,
+          status,
+          customerName,
+          customerPhone,
+          orderData.zaloUserId || null,
+          baseCostVnd ?? null,
+          estimatedPrice ?? null,
+          orderData.quotedBy || null,
+          orderData.quoteNote || null,
+          source,
+          JSON.stringify(shippingInfo),
+        ]
       );
-      console.log(`[Database] Saved shipping order ${trackingCode} (${source}) to PostgreSQL.`);
+      console.log(`[Database] Saved shipping order ${trackingCode} (${source}, status=${status}) to PostgreSQL.`);
     } catch (err: any) {
       console.error('[Database] Failed to save shipping order to PostgreSQL:', err?.message);
     }
@@ -3173,9 +3224,9 @@ async function recordCrmInteraction(
           saveShippingOrder({
             id: `zalo-ord-${userId}-${Date.now()}`,
             trackingCode: generateTrackingCode(),
-            status: 'created',
             customerName: customer.name,
             customerPhone: customer.phone,
+            zaloUserId: userId,
             source: 'zalo',
             shippingInfo,
           }).catch(() => { });
@@ -3311,6 +3362,12 @@ async function initDatabaseAndRestore() {
       );
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS ops_notified BOOLEAN DEFAULT FALSE;
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS ops_notified_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS zalo_user_id VARCHAR(100);
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS base_cost_vnd NUMERIC;
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS customer_quote_vnd NUMERIC;
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS quoted_by VARCHAR(100);
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS quoted_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS quote_note TEXT;
       CREATE INDEX IF NOT EXISTS idx_crm_messages_user_id ON crm_messages(user_id);
       CREATE INDEX IF NOT EXISTS idx_crm_customers_last_interaction ON crm_customers(last_interaction DESC);
       CREATE INDEX IF NOT EXISTS idx_shipping_orders_created_at ON shipping_orders(created_at DESC);
@@ -3394,6 +3451,12 @@ async function initDatabaseAndRestore() {
         status: r.status || 'created',
         customerName: r.customer_name || '',
         customerPhone: r.customer_phone || '',
+        zaloUserId: r.zalo_user_id || undefined,
+        baseCostVnd: r.base_cost_vnd != null ? Number(r.base_cost_vnd) : undefined,
+        estimatedPrice: r.customer_quote_vnd != null ? Number(r.customer_quote_vnd) : undefined,
+        quotedBy: r.quoted_by || undefined,
+        quotedAt: r.quoted_at ? new Date(r.quoted_at).toISOString() : undefined,
+        quoteNote: r.quote_note || undefined,
         source: (r.source as 'web' | 'zalo') || 'web',
         shippingInfo: r.shipping_info,
       });
@@ -3798,6 +3861,184 @@ export async function notifyDceOps(orderData: {
     opsPhone,
     opsUserId: null,
     error: 'Chưa liên kết Zalo user_id của Ops (hãy nhắn #ops tới Zalo OA từ 0934691766 để kích hoạt đẩy tự động)',
+  };
+}
+
+// Parse số tiền tiếng Việt từ text (VD: "450000", "450.000", "450k", "1.2tr")
+function parseVietnameseMoney(raw: string): number {
+  const s = String(raw || '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!s) return 0;
+  const trMatch = s.match(/^(\d+(?:[.,]\d+)?)tr(?:iệu)?$/i);
+  if (trMatch) {
+    return Math.round(parseFloat(trMatch[1].replace(',', '.')) * 1000000);
+  }
+  const kMatch = s.match(/^(\d+(?:[.,]\d+)?)k$/i);
+  if (kMatch) {
+    return Math.round(parseFloat(kMatch[1].replace(',', '.')) * 1000);
+  }
+  const digits = s.replace(/[^\d]/g, '');
+  if (!digits) return 0;
+  const num = parseInt(digits, 10);
+  // Nếu nhập số nhỏ như "450" hiểu là 450.000đ
+  return num > 0 && num < 5000 ? num * 1000 : num;
+}
+
+// Tìm đơn hàng theo mã đầy đủ (VN-LOG-1611-8191) hoặc 4 số cuối (8191)
+async function findOrderByTrackingCodeOrSuffix(codeInput: string): Promise<OrderRecordDB | null> {
+  const clean = String(codeInput || '').trim().toUpperCase();
+  if (!clean) return null;
+
+  const memMatch = inMemoryOrders.find(
+    (o) => o.trackingCode.toUpperCase() === clean || o.trackingCode.toUpperCase().endsWith(`-${clean}`)
+  );
+  if (memMatch) return memMatch;
+
+  if (dbPool) {
+    try {
+      const dbRes = await dbPool.query(
+        `SELECT * FROM shipping_orders WHERE UPPER(tracking_code) = $1 OR UPPER(tracking_code) LIKE $2 ORDER BY created_at DESC LIMIT 1`,
+        [clean, `%-${clean}`]
+      );
+      if (dbRes.rows.length > 0) {
+        const r = dbRes.rows[0];
+        return {
+          id: r.id,
+          trackingCode: r.tracking_code,
+          createdAt: r.created_at ? new Date(r.created_at).toLocaleString('vi-VN') : new Date().toLocaleString('vi-VN'),
+          status: r.status || 'created',
+          customerName: r.customer_name || '',
+          customerPhone: r.customer_phone || '',
+          zaloUserId: r.zalo_user_id || undefined,
+          baseCostVnd: r.base_cost_vnd != null ? Number(r.base_cost_vnd) : undefined,
+          estimatedPrice: r.customer_quote_vnd != null ? Number(r.customer_quote_vnd) : undefined,
+          quotedBy: r.quoted_by || undefined,
+          quotedAt: r.quoted_at ? new Date(r.quoted_at).toISOString() : undefined,
+          quoteNote: r.quote_note || undefined,
+          source: (r.source as 'web' | 'zalo') || 'web',
+          shippingInfo: r.shipping_info,
+        };
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+// Áp dụng báo giá từ Ops / Default Supplier cho đơn hàng ngoại lệ & gửi báo giá lại cho Khách
+async function applyOrderQuote(params: {
+  codeOrSuffix: string;
+  inputAmountVnd: number;
+  applyMargin?: boolean;
+  quotedBy?: string;
+  quoteNote?: string;
+}): Promise<{
+  success: boolean;
+  order?: OrderRecordDB;
+  baseCostVnd?: number;
+  customerQuoteVnd?: number;
+  customerNotified?: boolean;
+  error?: string;
+}> {
+  const order = await findOrderByTrackingCodeOrSuffix(params.codeOrSuffix);
+  if (!order) {
+    return { success: false, error: `Không tìm thấy đơn hàng với mã "${params.codeOrSuffix}"` };
+  }
+  if (!params.inputAmountVnd || params.inputAmountVnd <= 0) {
+    return { success: false, error: 'Số tiền báo giá không hợp lệ' };
+  }
+
+  const applyMargin = params.applyMargin !== false;
+  const baseCostVnd = Math.round(params.inputAmountVnd);
+  const customerQuoteVnd = applyMargin ? Math.round((baseCostVnd * 1.3) / 1000) * 1000 : baseCostVnd;
+  const quotedBy = params.quotedBy || `DCE Ops (${dceOpsPhone})`;
+  const quotedAt = new Date().toISOString();
+
+  order.status = 'quoted';
+  order.baseCostVnd = baseCostVnd;
+  order.estimatedPrice = customerQuoteVnd;
+  order.quotedBy = quotedBy;
+  order.quotedAt = quotedAt;
+  order.quoteNote = params.quoteNote;
+
+  const memIdx = inMemoryOrders.findIndex((o) => o.id === order.id);
+  if (memIdx >= 0) {
+    inMemoryOrders[memIdx] = order;
+  } else {
+    inMemoryOrders.unshift(order);
+  }
+
+  if (dbPool) {
+    try {
+      await dbPool.query(
+        `UPDATE shipping_orders
+         SET status = 'quoted',
+             base_cost_vnd = $1,
+             customer_quote_vnd = $2,
+             quoted_by = $3,
+             quoted_at = NOW(),
+             quote_note = $4
+         WHERE tracking_code = $5`,
+        [baseCostVnd, customerQuoteVnd, quotedBy, params.quoteNote || null, order.trackingCode]
+      );
+    } catch (e: any) {
+      console.error('[Quick Quote] Failed to update DB:', e?.message);
+    }
+  }
+
+  // Tự động gửi báo giá lại cho Khách hàng qua Zalo OA nếu đơn có zaloUserId
+  let customerNotified = false;
+  const targetCustomerId =
+    order.zaloUserId ||
+    (order.id.startsWith('zalo-ord-') ? order.id.split('-')[2] : undefined);
+
+  if (targetCustomerId) {
+    const sAddr = order.shippingInfo?.sender?.address || '(Chưa có)';
+    const rAddr = order.shippingInfo?.receiver?.address || '(Chưa có)';
+    const cargo = order.shippingInfo?.cargo?.name || 'Hàng hóa';
+    const weight = order.shippingInfo?.cargo?.weight || (order.shippingInfo?.cargo?.weightKg ? `${order.shippingInfo.cargo.weightKg}kg` : '');
+    const dt = order.shippingInfo?.deliveryTime || 'Theo thỏa thuận';
+
+    const customerMsg = `💰 [ĐI CHUNG EXPRESS - BÁO GIÁ ĐƠN HÀNG ${order.trackingCode}]
+-----------------------------
+📍 Điểm lấy: ${sAddr}
+🎯 Điểm giao: ${rAddr}
+📦 Hàng hóa: ${cargo}${weight ? ` (${weight})` : ''}
+⏰ Thời gian: ${dt}
+
+💵 CƯỚC VẬN CHUYỂN TRỌN GÓI: ${formatVnd(customerQuoteVnd)}${params.quoteNote ? `\n📝 Ghi chú: ${params.quoteNote}` : ''}
+-----------------------------
+👉 Anh/chị vui lòng nhắn "Đồng ý" hoặc "Chốt đơn" để bên em lên lệnh lấy hàng và gửi thông tin thanh toán nhé ạ!`;
+
+    customerNotified = await sendZaloOAReply(targetCustomerId, customerMsg);
+    if (customerNotified) {
+      await recordCrmInteraction(targetCustomerId, 'bot', customerMsg, order.shippingInfo, 'Báo Giá Từ Điều Phối');
+      const sess = zaloUserSessions.get(targetCustomerId);
+      if (sess) {
+        sess.history.push({ role: 'model', content: customerMsg });
+        saveSessionsCache();
+      }
+    }
+  }
+
+  // Gửi xác nhận lại cho DCE Ops
+  if (dceOpsUserId) {
+    const opsAck = `✅ Đã cập nhật báo giá đơn ${order.trackingCode} (${quotedBy}):\n- Giá gốc: ${formatVnd(baseCostVnd)}\n- Giá báo khách: ${formatVnd(customerQuoteVnd)}${customerNotified ? '\n📲 Đã tự động gửi báo giá tới Zalo khách hàng!' : ''}`;
+    sendZaloOAReply(dceOpsUserId, opsAck).catch(() => {});
+  }
+
+  logZaloEvent('outgoing_reply', `Cập nhật báo giá đơn ${order.trackingCode}: ${formatVnd(customerQuoteVnd)} (Gốc: ${formatVnd(baseCostVnd)})`, {
+    trackingCode: order.trackingCode,
+    baseCostVnd,
+    customerQuoteVnd,
+    quotedBy,
+    customerNotified,
+  });
+
+  return {
+    success: true,
+    order,
+    baseCostVnd,
+    customerQuoteVnd,
+    customerNotified,
   };
 }
 
@@ -4228,6 +4469,37 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
         return;
       }
 
+      // Cú pháp phản hồi báo giá trực tiếp trên Zalo của Ops / Supplier: #baogia <MÃ_ĐƠN> <GIÁ> [ghi chú]
+      const baogiaMatch = trimmed.match(/^(?:#baogia|baogia|#bg)\s+([A-Za-z0-9-]+)\s+([^\s]+)(?:\s+(.+))?$/i);
+      if (baogiaMatch) {
+        const codePart = baogiaMatch[1];
+        const pricePart = baogiaMatch[2];
+        const notePart = baogiaMatch[3]?.trim();
+        const parsedAmount = parseVietnameseMoney(pricePart);
+        const quotedByLabel =
+          userId === defaultSupplierUserId
+            ? `${defaultSupplierName} (${defaultSupplierPhone})`
+            : userId === dceOpsUserId
+            ? `DCE Ops (${dceOpsPhone})`
+            : `Zalo (${userId.slice(-4)})`;
+
+        const qRes = await applyOrderQuote({
+          codeOrSuffix: codePart,
+          inputAmountVnd: parsedAmount,
+          applyMargin: true,
+          quotedBy: quotedByLabel,
+          quoteNote: notePart,
+        });
+
+        if (qRes.success && qRes.order) {
+          const replyText = `✅ Đã ghi nhận báo giá cho đơn ${qRes.order.trackingCode}!\n- Giá gốc nhập: ${formatVnd(qRes.baseCostVnd || 0)}\n- Giá báo Khách (+30%): ${formatVnd(qRes.customerQuoteVnd || 0)}${qRes.customerNotified ? '\n📲 Đã tự động gửi báo giá tới Zalo khách hàng!' : ''}`;
+          await sendZaloOAReply(userId, replyText);
+        } else {
+          await sendZaloOAReply(userId, `❌ Không thể cập nhật báo giá: ${qRes.error || 'Lỗi không xác định'}\nVí dụ đúng: #baogia VN-LOG-1611-8191 450000`);
+        }
+        return;
+      }
+
       const isResetOrder = /^(?:tạo\s*đơn\s*mới|đơn\s*mới|hủy\s*đơn|làm\s*lại|reset)\b/i.test(trimmed);
 
       let session = zaloUserSessions.get(userId);
@@ -4402,7 +4674,7 @@ app.get('/api/orders', async (_req: Request, res: Response) => {
   if (dbPool) {
     try {
       const result = await dbPool.query(`
-        SELECT id, tracking_code, created_at, status, customer_name, customer_phone, source, shipping_info
+        SELECT id, tracking_code, created_at, status, customer_name, customer_phone, zalo_user_id, base_cost_vnd, customer_quote_vnd, quoted_by, quoted_at, quote_note, source, shipping_info
         FROM shipping_orders
         ORDER BY created_at DESC
         LIMIT 100
@@ -4414,6 +4686,12 @@ app.get('/api/orders', async (_req: Request, res: Response) => {
         status: r.status,
         customerName: r.customer_name,
         customerPhone: r.customer_phone,
+        zaloUserId: r.zalo_user_id || undefined,
+        baseCostVnd: r.base_cost_vnd != null ? Number(r.base_cost_vnd) : undefined,
+        estimatedPrice: r.customer_quote_vnd != null ? Number(r.customer_quote_vnd) : undefined,
+        quotedBy: r.quoted_by || undefined,
+        quotedAt: r.quoted_at ? new Date(r.quoted_at).toISOString() : undefined,
+        quoteNote: r.quote_note || undefined,
         source: r.source,
         shippingInfo: r.shipping_info,
       }));
@@ -4423,6 +4701,177 @@ app.get('/api/orders', async (_req: Request, res: Response) => {
     }
   }
   return res.json({ success: true, orders: inMemoryOrders, source: 'memory' });
+});
+
+// POST /api/orders/:trackingCode/quote - Lưu báo giá từ Ops / Supplier cho đơn ngoại lệ
+app.post('/api/orders/:trackingCode/quote', async (req: Request, res: Response) => {
+  try {
+    const { trackingCode } = req.params;
+    const { baseCostVnd, applyMargin, quotedBy, quoteNote } = req.body || {};
+    const parsedAmount = typeof baseCostVnd === 'number' ? baseCostVnd : parseVietnameseMoney(String(baseCostVnd || ''));
+    const result = await applyOrderQuote({
+      codeOrSuffix: trackingCode,
+      inputAmountVnd: parsedAmount,
+      applyMargin: applyMargin !== false,
+      quotedBy: quotedBy || `DCE Ops (${dceOpsPhone})`,
+      quoteNote,
+    });
+    if (!result.success) {
+      return res.status(404).json(result);
+    }
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message });
+  }
+});
+
+// GET /quote/:trackingCode - Cổng Nhập Giá Nhanh (Quick Quote Portal) tối ưu cho Mobile của DCE Ops & Supplier
+app.get('/quote/:trackingCode', async (req: Request, res: Response) => {
+  const { trackingCode } = req.params;
+  const order = await findOrderByTrackingCodeOrSuffix(trackingCode);
+  if (!order) {
+    return res.status(404).send(`
+      <!DOCTYPE html>
+      <html lang="vi">
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Không tìm thấy đơn</title></head>
+      <body style="font-family:sans-serif;padding:32px;text-align:center;background:#f8fafc;color:#1e293b;">
+        <h2>❌ Không tìm thấy đơn hàng ${trackingCode}</h2>
+        <p>Vui lòng kiểm tra lại mã vận đơn hoặc liên hệ DCE Ops (${dceOpsPhone}).</p>
+      </body></html>
+    `);
+  }
+
+  const sAddr = order.shippingInfo?.sender?.address || '(Chưa có)';
+  const rAddr = order.shippingInfo?.receiver?.address || '(Chưa có)';
+  const cargo = order.shippingInfo?.cargo?.name || 'Hàng hóa';
+  const weight = order.shippingInfo?.cargo?.weight || (order.shippingInfo?.cargo?.weightKg ? `${order.shippingInfo.cargo.weightKg} kg` : 'Theo thực tế');
+  const dims = order.shippingInfo?.cargo?.dimensions?.raw || 'Tiêu chuẩn';
+  const notes = order.shippingInfo?.cargo?.specialNotes || 'Không có';
+  const dt = order.shippingInfo?.deliveryTime || 'Thỏa thuận';
+
+  return res.send(`
+    <!DOCTYPE html>
+    <html lang="vi">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Báo Giá Nhanh - ${order.trackingCode} | Đi Chung Express</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f1f5f9; margin: 0; padding: 16px; color: #0f172a; }
+        .card { max-width: 480px; margin: 0 auto; background: #fff; border-radius: 16px; box-shadow: 0 10px 25px rgba(15,23,42,0.08); overflow: hidden; border: 1px solid #e2e8f0; }
+        .header { background: linear-gradient(135deg, #1d4ed8, #4338ca); color: #fff; padding: 20px; }
+        .badge { display: inline-block; background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+        .body { padding: 20px; }
+        .info-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; font-size: 13.5px; line-height: 1.55; margin-bottom: 18px; }
+        .label { font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 6px; display: block; }
+        input, select, textarea { width: 100%; box-sizing: border-box; padding: 11px 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 15px; margin-bottom: 12px; }
+        .preview { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; padding: 12px; border-radius: 10px; font-size: 13px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
+        .btn { width: 100%; background: #2563eb; color: #fff; border: none; padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; }
+        .btn:disabled { opacity: 0.6; }
+        .msg { margin-top: 14px; padding: 12px; border-radius: 10px; font-size: 13.5px; display: none; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="header">
+          <div class="badge">ĐI CHUNG EXPRESS — QUICK QUOTE</div>
+          <h2 style="margin:0;font-size:20px;">Đơn: ${order.trackingCode}</h2>
+          <div style="font-size:12px;opacity:0.85;margin-top:4px;">Trạng thái: ${order.status === 'quoted' ? 'Đã báo giá (' + formatVnd(order.estimatedPrice || 0) + ')' : 'Chờ báo giá'}</div>
+        </div>
+        <div class="body">
+          <div class="info-box">
+            <div><strong>📍 Lấy hàng:</strong> ${sAddr}</div>
+            <div style="margin-top:6px;"><strong>🎯 Giao hàng:</strong> ${rAddr}</div>
+            <div style="margin-top:6px;"><strong>📦 Hàng hóa:</strong> ${cargo} | ${weight} | KT: ${dims}</div>
+            <div style="margin-top:6px;"><strong>⏰ Thời gian:</strong> ${dt}</div>
+            <div style="margin-top:6px;"><strong>📝 Ghi chú:</strong> ${notes}</div>
+          </div>
+
+          <form id="quoteForm">
+            <label class="label">Người báo giá</label>
+            <select id="quotedBy">
+              <option value="DCE Ops (${dceOpsPhone})">DCE Ops (${dceOpsPhone})</option>
+              <option value="${defaultSupplierName} (${defaultSupplierPhone})">${defaultSupplierName} (${defaultSupplierPhone})</option>
+            </select>
+
+            <label class="label">Giá cước nhập (VNĐ) — VD: 450000</label>
+            <input type="number" id="baseCost" min="10000" step="1000" required placeholder="Nhập số tiền VNĐ..." value="${order.baseCostVnd || ''}" />
+
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:14px;cursor:pointer;">
+              <input type="checkbox" id="applyMargin" checked style="width:auto;margin:0;" />
+              <span>Tự động cộng <strong>+30% Margin</strong> để báo Khách hàng</span>
+            </label>
+
+            <div class="preview">
+              <span>Giá dự kiến báo Khách:</span>
+              <strong id="customerPreview" style="font-size:17px;">0 đ</strong>
+            </div>
+
+            <label class="label">Ghi chú thêm (tùy chọn)</label>
+            <textarea id="quoteNote" rows="2" placeholder="VD: Đã gồm phí bốc xếp, xe tải 1.25 tấn...">${order.quoteNote || ''}</textarea>
+
+            <button type="submit" class="btn" id="submitBtn">✅ Xác nhận & Gửi báo giá</button>
+          </form>
+          <div id="resultMsg" class="msg"></div>
+        </div>
+      </div>
+
+      <script>
+        const baseInput = document.getElementById('baseCost');
+        const marginCheck = document.getElementById('applyMargin');
+        const previewEl = document.getElementById('customerPreview');
+        function updatePreview() {
+          const val = parseFloat(baseInput.value || '0');
+          if (!val || val <= 0) { previewEl.textContent = '0 đ'; return; }
+          const finalPrice = marginCheck.checked ? Math.round((val * 1.3) / 1000) * 1000 : Math.round(val);
+          previewEl.textContent = finalPrice.toLocaleString('vi-VN') + ' đ';
+        }
+        baseInput.addEventListener('input', updatePreview);
+        marginCheck.addEventListener('change', updatePreview);
+        updatePreview();
+
+        document.getElementById('quoteForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const btn = document.getElementById('submitBtn');
+          const msg = document.getElementById('resultMsg');
+          btn.disabled = true;
+          btn.textContent = 'Đang lưu báo giá...';
+          try {
+            const res = await fetch('/api/orders/${encodeURIComponent(order.trackingCode)}/quote', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                baseCostVnd: Number(baseInput.value),
+                applyMargin: marginCheck.checked,
+                quotedBy: document.getElementById('quotedBy').value,
+                quoteNote: document.getElementById('quoteNote').value.trim()
+              })
+            });
+            const data = await res.json();
+            msg.style.display = 'block';
+            if (data.success) {
+              msg.style.background = '#ecfdf5';
+              msg.style.color = '#065f46';
+              msg.innerHTML = '🎉 <strong>Đã lưu báo giá thành công!</strong><br/>Giá báo khách: <strong>' + Number(data.customerQuoteVnd).toLocaleString('vi-VN') + ' đ</strong>' + (data.customerNotified ? '<br/>📲 Đã tự động gửi tin nhắn báo giá tới Zalo Khách hàng!' : '');
+            } else {
+              msg.style.background = '#fef2f2';
+              msg.style.color = '#991b1b';
+              msg.textContent = '❌ Lỗi: ' + (data.error || 'Không thể lưu');
+            }
+          } catch (err) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#991b1b';
+            msg.textContent = '❌ Lỗi kết nối máy chủ';
+          } finally {
+            btn.disabled = false;
+            btn.textContent = '✅ Xác nhận & Gửi báo giá';
+          }
+        });
+      </script>
+    </body>
+    </html>
+  `);
 });
 
 // POST /api/orders - Tạo hoặc cập nhật phiếu vận đơn vào Database

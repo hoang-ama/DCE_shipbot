@@ -61,9 +61,14 @@ export interface OrderRecord {
   id: string;
   trackingCode: string;
   createdAt: string;
-  status: 'created' | 'picked_up' | 'delivering' | 'delivered';
+  status: 'created' | 'quoting' | 'quoted' | 'picked_up' | 'delivering' | 'delivered';
   shippingInfo: ShippingInfo;
   estimatedPrice?: number;
+  baseCostVnd?: number;
+  quotedBy?: string;
+  quotedAt?: string;
+  quoteNote?: string;
+  zaloUserId?: string;
   serviceType?: string;
   source?: 'web' | 'zalo';
   customerName?: string;

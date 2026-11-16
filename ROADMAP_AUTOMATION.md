@@ -100,20 +100,20 @@ flowchart TD
 
 ---
 
-### GIAI ĐOẠN 2: Luồng Điều Phối Báo Giá Ngoại Lệ (DCE Ops & Default Supplier)
+### GIAI ĐOẠN 2: Luồng Điều Phối Báo Giá Ngoại Lệ (DCE Ops & Default Supplier) — ✅ ĐÃ TRIỂN KHAI
 > **Mục tiêu**: Khi đơn hàng không khớp Bảng giá chuẩn (`hasStandardPrice === false`), hệ thống tự động đẩy sang cho **DCE Ops (`0934691766`)** và **Nhà cung cấp mặc định (`Dichung Express` - `0906106066`)** qua Zalo để lấy giá nhanh.
 
 - [x] **2.1. Cấu hình động DCE Ops & Nhà cung cấp mặc định trên Web UI (`Zalo OA` Modal & `/api/config/routing`)**:
   - Lưu SĐT DCE Ops (`0934691766`), Tên Nhà cung cấp mặc định (`Dichung Express`), SĐT Zalo Nhà cung cấp (`0906106066`) vào PostgreSQL `bot_settings`.
   - Hỗ trợ cú pháp kích hoạt trên Zalo OA: `#ops` cho DCE Ops và `#supplier` cho Nhà cung cấp mặc định.
-- [ ] **2.2. Tự động bắn yêu cầu báo giá song song**:
+- [x] **2.2. Tự động bắn yêu cầu báo giá song song**:
   - Khi đơn không có giá chuẩn:
     * Gửi thông báo qua Zalo cho **DCE Ops (`0934691766`)**.
-    * Gửi thông báo qua Zalo cho **Default Supplier**.
-  - Tin nhắn gửi đi kèm **Mã đơn + Chi tiết hàng/tuyến + Link nhập giá nhanh 1-Click** (`https://ai.dichung.vn/quote/:trackingCode`).
-- [ ] **2.3. Cổng Nhập Giá Nhanh (Quick Quote Portal) & Phản hồi qua Chat**:
-  - Ops hoặc Supplier bấm vào link trên điện thoại -> Nhập số tiền báo giá -> Hệ thống tự lưu giá gốc, tính giá báo khách (nếu cần cộng Margin) và kích hoạt bước 3 gửi lại cho khách hàng.
-  - Hỗ trợ Ops/Supplier reply trực tiếp cú pháp trên Zalo (VD: `#baogia VN-LOG-8191 450000`).
+    * Gửi thông báo qua Zalo cho **Default Supplier (`Dichung Express` - `0906106066`)**.
+  - Tin nhắn gửi đi kèm **Mã đơn + Chi tiết hàng/tuyến + Link nhập giá nhanh 1-Click** (`https://ai.dichung.vn/quote/:trackingCode`) + cú pháp nhắn lại `#baogia`.
+- [x] **2.3. Cổng Nhập Giá Nhanh (Quick Quote Portal) & Phản hồi qua Chat**:
+  - Trang Mobile Portal `GET /quote/:trackingCode` & API `POST /api/orders/:trackingCode/quote`: Ops/Supplier nhập giá gốc, xem trước giá +30% Margin và bấm xác nhận -> tự động lưu DB, chuyển trạng thái `quoted` và tự động gửi báo giá qua Zalo OA cho Khách hàng.
+  - Hỗ trợ Ops/Supplier reply trực tiếp cú pháp trên Zalo OA (`#baogia VN-LOG-8191 450000` hoặc `#baogia 8191 450k`).
 
 ---
 
@@ -171,7 +171,7 @@ flowchart TD
 | :--- | :--- | :---: | :---: | :---: |
 | **Giai đoạn 0** | Chat Zalo OA, PostgreSQL, VPS CI/CD, Bắn đơn DCE Ops (`0934691766`) | Cực cao | **Hoàn thành** | Đã vận hành |
 | **Giai đoạn 1** | Động cơ Bảng giá chuẩn (`Pricing Engine`), Quy đổi trọng lượng & Cấu hình động Ops/Supplier | Cao | **Hoàn thành** | Đã vận hành |
-| **Giai đoạn 2** | Chuyển đơn ngoại lệ cho Ops + Default Supplier & Trang nhập giá nhanh | Cao | Chưa làm | 1 - 2 ngày |
+| **Giai đoạn 2** | Chuyển đơn ngoại lệ cho Ops + Default Supplier, Quick Quote Portal (`/quote/:code`) & `#baogia` | Cao | **Hoàn thành** | Đã vận hành |
 | **Giai đoạn 3** | Phiếu chốt đơn, VietQR tự động & Gửi thông tin điều phối lấy hàng | Cao | Chưa làm | 2 - 3 ngày |
 | **Giai đoạn 4** | Asterisk IVR chào + Webhook CallerID + Zalo ZNS/OA khởi động collect đơn | Trung bình | Chưa làm | 2 - 3 ngày |
 

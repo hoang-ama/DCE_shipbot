@@ -122,8 +122,18 @@ export const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
                     <span className="font-mono font-bold text-xs text-blue-600">
                       {order.trackingCode}
                     </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
-                      Đã tạo đơn
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+                      order.status === 'quoting'
+                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                        : order.status === 'quoted'
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    }`}>
+                      {order.status === 'quoting'
+                        ? 'Chờ báo giá'
+                        : order.status === 'quoted'
+                        ? `Đã báo giá${order.estimatedPrice ? `: ${order.estimatedPrice.toLocaleString('vi-VN')} đ` : ''}`
+                        : `Đã tạo đơn${order.estimatedPrice ? ` • ${order.estimatedPrice.toLocaleString('vi-VN')} đ` : ''}`}
                     </span>
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
                       order.source === 'zalo'
@@ -193,6 +203,16 @@ export const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
                   </button>
 
                   <div className="flex items-center gap-1.5">
+                    <a
+                      href={`/quote/${encodeURIComponent(order.trackingCode)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-2 py-1.5 rounded-lg border border-amber-200 bg-amber-50/70 hover:bg-amber-100 text-amber-800 text-[11px] flex items-center gap-1 font-semibold transition-colors"
+                      title="Mở Cổng Nhập Giá Nhanh (Quick Quote Portal) cho Ops / Supplier"
+                    >
+                      <span>Nhập giá</span>
+                    </a>
+
                     <button
                       onClick={() => handleSendOps(order)}
                       className="px-2 py-1.5 rounded-lg border border-blue-200 bg-blue-50/70 hover:bg-blue-100 text-blue-700 text-xs flex items-center gap-1 font-semibold transition-colors cursor-pointer"
