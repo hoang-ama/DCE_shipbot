@@ -22,7 +22,7 @@ COPY --from=builder /app/dist ./dist
 COPY server.ts ./
 COPY tsconfig.json ./
 COPY dify_dichung_bot.yml ./
-COPY src/data ./src/data
+COPY src ./src
 
 # Ensure runtime user can write fallback cache files (.zalo_token.json, .zalo_sessions.json)
 RUN chown -R node:node /app
