@@ -14,6 +14,7 @@ import {
   Database,
   Zap,
 } from 'lucide-react';
+import { RoutingConfig } from '../types';
 
 interface ZaloStatusData {
   connected: boolean;
@@ -41,6 +42,7 @@ interface ZaloStatusData {
     isLinked: boolean;
     userId: string | null;
   };
+  routing?: RoutingConfig;
   stats: {
     activeSessions: number;
     serverTime: string;
@@ -59,17 +61,23 @@ interface ZaloStatusModalProps {
   isOpen: boolean;
   onClose: () => void;
   onStatusUpdate?: (connected: boolean) => void;
+  onRoutingUpdate?: (routing: RoutingConfig) => void;
 }
 
 export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
   isOpen,
   onClose,
   onStatusUpdate,
+  onRoutingUpdate,
 }) => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ZaloStatusData | null>(null);
   const [accessTokenInput, setAccessTokenInput] = useState('');
   const [refreshTokenInput, setRefreshTokenInput] = useState('');
+  const [opsPhoneInput, setOpsPhoneInput] = useState('0934691766');
+  const [supplierNameInput, setSupplierNameInput] = useState('Dichung Express');
+  const [supplierPhoneInput, setSupplierPhoneInput] = useState('0906106066');
+  const [isSavingRouting, setIsSavingRouting] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ text: string; isError: boolean } | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'update' | 'database' | 'logs' | 'guide'>('overview');
@@ -83,6 +91,14 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
       const res = await fetch('/api/zalo/status');
       const json: ZaloStatusData = await res.json();
       setData(json);
+      if (json.routing) {
+        setOpsPhoneInput(json.routing.opsPhone || '0934691766');
+        setSupplierNameInput(json.routing.supplierName || 'Dichung Express');
+        setSupplierPhoneInput(json.routing.supplierPhone || '0906106066');
+        if (onRoutingUpdate) onRoutingUpdate(json.routing);
+      } else if (json.ops?.phone) {
+        setOpsPhoneInput(json.ops.phone);
+      }
       if (onStatusUpdate) {
         onStatusUpdate(json.connected);
       }
@@ -90,6 +106,35 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
       console.error('Failed to fetch Zalo status:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveRouting = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingRouting(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch('/api/config/routing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          opsPhone: opsPhoneInput.trim(),
+          supplierName: supplierNameInput.trim(),
+          supplierPhone: supplierPhoneInput.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setActionMessage({ text: json.message || 'Đã lưu cấu hình Ops & Nhà cung cấp mặc định!', isError: false });
+        if (onRoutingUpdate) onRoutingUpdate(json);
+        await fetchStatus();
+      } else {
+        setActionMessage({ text: json.error || 'Không thể lưu cấu hình', isError: true });
+      }
+    } catch (err: any) {
+      setActionMessage({ text: `Lỗi kết nối: ${err?.message}`, isError: true });
+    } finally {
+      setIsSavingRouting(false);
     }
   };
 
@@ -473,6 +518,75 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
                   <div className="text-[11px] text-slate-500">Tự động duy trì hội thoại liên tục</div>
                 </div>
               </div>
+
+              {/* Cấu hình Điều phối DCE Ops & Nhà cung cấp mặc định */}
+              <form onSubmit={handleSaveRouting} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900">
+                    Cấu hình Zalo Điều phối (DCE Ops & Nhà cung cấp mặc định)
+                  </h4>
+                  <p className="text-[10.5px] text-slate-500">
+                    Khi đơn chưa có giá chuẩn, hệ thống tự động đẩy đơn sang các số Zalo này để báo giá
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="block text-[10.5px] font-semibold text-slate-600 mb-1">
+                      SĐT Zalo DCE Ops
+                    </label>
+                    <input
+                      type="text"
+                      value={opsPhoneInput}
+                      onChange={(e) => setOpsPhoneInput(e.target.value)}
+                      placeholder="0934691766"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10.5px] font-semibold text-slate-600 mb-1">
+                      Tên Nhà cung cấp mặc định
+                    </label>
+                    <input
+                      type="text"
+                      value={supplierNameInput}
+                      onChange={(e) => setSupplierNameInput(e.target.value)}
+                      placeholder="Dichung Express"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10.5px] font-semibold text-slate-600 mb-1">
+                      SĐT Zalo Nhà cung cấp
+                    </label>
+                    <input
+                      type="text"
+                      value={supplierPhoneInput}
+                      onChange={(e) => setSupplierPhoneInput(e.target.value)}
+                      placeholder="0906106066"
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <span className="text-[10.5px] text-slate-500">
+                    NCC: <strong className="text-slate-700">{supplierNameInput}</strong> —{' '}
+                    {data?.routing?.isSupplierLinked ? (
+                      <span className="text-emerald-600 font-semibold">Đã liên kết Zalo OA</span>
+                    ) : (
+                      <span>Nhắn <code className="bg-slate-200 px-1 rounded">#supplier</code> tới OA để kích hoạt</span>
+                    )}
+                  </span>
+                  <button
+                    type="submit"
+                    disabled={isSavingRouting}
+                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0"
+                  >
+                    {isSavingRouting ? 'Đang lưu...' : 'Lưu cấu hình'}
+                  </button>
+                </div>
+              </form>
 
               {/* Action buttons */}
               <div className="flex gap-2 pt-2">

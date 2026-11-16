@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CheckCircle2, Copy, Check, X, PackageCheck, Send } from 'lucide-react';
-import { ShippingInfo } from '../types';
+import { ShippingInfo, RoutingConfig } from '../types';
 import { generateShipmentTextSummary, generateOpsShipmentNotification, DCE_OPS_PHONE } from '../utils/logistics';
 
 interface SuccessOrderModalProps {
@@ -9,6 +9,7 @@ interface SuccessOrderModalProps {
   shippingInfo: ShippingInfo;
   trackingCode: string;
   onNewOrder: () => void;
+  routingConfig?: RoutingConfig;
 }
 
 export const SuccessOrderModal: React.FC<SuccessOrderModalProps> = ({
@@ -17,10 +18,13 @@ export const SuccessOrderModal: React.FC<SuccessOrderModalProps> = ({
   shippingInfo,
   trackingCode,
   onNewOrder,
+  routingConfig,
 }) => {
   const [copied, setCopied] = useState(false);
   const [opsNotified, setOpsNotified] = useState(false);
   if (!isOpen) return null;
+
+  const opsPhone = routingConfig?.opsPhone || DCE_OPS_PHONE;
 
   const handleCopy = () => {
     const text = generateShipmentTextSummary(shippingInfo, trackingCode);
@@ -30,7 +34,7 @@ export const SuccessOrderModal: React.FC<SuccessOrderModalProps> = ({
   };
 
   const handleNotifyOps = () => {
-    const opsText = generateOpsShipmentNotification(shippingInfo, trackingCode, 'web');
+    const opsText = generateOpsShipmentNotification(shippingInfo, trackingCode, 'web', opsPhone);
     navigator.clipboard.writeText(opsText);
     setOpsNotified(true);
     setTimeout(() => setOpsNotified(false), 3000);
@@ -49,7 +53,7 @@ export const SuccessOrderModal: React.FC<SuccessOrderModalProps> = ({
       }).catch(() => {});
     } catch (_) {}
 
-    window.open(`https://zalo.me/${DCE_OPS_PHONE}`, '_blank');
+    window.open(`https://zalo.me/${opsPhone}`, '_blank');
   };
 
   return (
@@ -147,12 +151,12 @@ export const SuccessOrderModal: React.FC<SuccessOrderModalProps> = ({
               {opsNotified ? (
                 <>
                   <Check className="w-4 h-4 text-emerald-300" />
-                  <span>Đã copy báo giá & mở Zalo 0934691766!</span>
+                  <span>Đã copy báo giá & mở Zalo {opsPhone}!</span>
                 </>
               ) : (
                 <>
                   <Send className="w-4 h-4" />
-                  <span>📲 Bắn Zalo cho DCE Ops (0934691766) để báo giá Supplier</span>
+                  <span>📲 Bắn Zalo cho DCE Ops ({opsPhone}) để báo giá Supplier</span>
                 </>
               )}
             </button>

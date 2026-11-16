@@ -7,6 +7,12 @@ import crypto from 'crypto';
 import pg from 'pg';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import { resolveAdministrativeAddress, parseGoogleMapsLocation } from './src/data/vnAdministrative';
+import {
+  calculateDCExpressPriceFromShippingInfo,
+  DEFAULT_STANDARD_ROUTES,
+  StandardPriceRoute,
+  formatVnd,
+} from './src/utils/pricingEngine';
 
 dotenv.config();
 
@@ -2093,6 +2099,11 @@ export function generateOpsShipmentNotification(
   const senderContact = [sName, sPhone].filter(Boolean).join(' - ');
   const receiverContact = [info?.receiver?.name, info?.receiver?.phone].filter(Boolean).join(' - ');
 
+  const pricing = calculateDCExpressPriceFromShippingInfo(info, activeStandardRoutes);
+  const priceLine = pricing.hasStandardPrice && pricing.recommendedServices[0]
+    ? `\n💰 Giá cước chuẩn tham khảo: ${formatVnd(pricing.recommendedServices[0].customerQuoteVnd)} (${pricing.recommendedServices[0].serviceName})`
+    : `\n⚠️ Trạng thái giá: Chưa có trong Bảng giá chuẩn -> Cần báo giá ngay`;
+
   return `🚛 [ĐI CHUNG EXPRESS - BÁO GIÁ ĐƠN MỚI CHO SUPPLIER]
 📋 Mã vận đơn: ${code}
 ---------------------------------------------
@@ -2108,10 +2119,10 @@ export function generateOpsShipmentNotification(
    - Kích thước: ${cargoDim}${specialNotes}
 
 ⏰ THỜI GIAN GIAO NHẬN:
-   - ${deliveryTime}
+   - ${deliveryTime}${priceLine}
 ---------------------------------------------
-⚡ Kính gửi Quý Đối Tác / Nhà Xe báo giá vận chuyển tuyến này giúp Đi Chung Express.
-📞 Hotline Điều phối DCE Ops: ${process.env.DCE_OPS_PHONE || '0934691766'}`;
+⚡ Kính gửi Quý Đối Tác / Nhà Xe (${defaultSupplierName}) báo giá vận chuyển tuyến này giúp Đi Chung Express.
+📞 Hotline Điều phối DCE Ops: ${dceOpsPhone}`;
 }
 
 export function formatOrderClosingWithBill(info: any): string {
@@ -2890,7 +2901,8 @@ app.post('/api/chat', async (req: Request, res: Response) => {
   }
 
   const result = await processChatPipeline(rawMessage, history, currentInfo);
-  return res.json(result);
+  const pricing = calculateDCExpressPriceFromShippingInfo(result.shippingInfo, activeStandardRoutes);
+  return res.json({ ...result, pricing });
 });
 
 // --- ZALO OA INTEGRATION WITH SESSION MEMORY & AUTO-REFRESH ---
@@ -2902,9 +2914,17 @@ let currentZaloAccessToken = process.env.ZALO_OA_ACCESS_TOKEN || '';
 let currentZaloRefreshToken = process.env.ZALO_REFRESH_TOKEN || '';
 let lastTokenRefreshTimestamp = Date.now();
 
-// Cấu hình Zalo nhân sự Điều phối Vận hành (DCE Ops)
+// Cấu hình Zalo nhân sự Điều phối Vận hành (DCE Ops) & Nhà cung cấp mặc định (có thể sửa trên giao diện)
 export const DCE_OPS_PHONE = process.env.DCE_OPS_PHONE || '0934691766';
+let dceOpsPhone: string = DCE_OPS_PHONE;
 let dceOpsUserId: string = process.env.DCE_OPS_ZALO_USER_ID || '';
+
+let defaultSupplierName: string = process.env.DEFAULT_SUPPLIER_NAME || 'Dichung Express';
+let defaultSupplierPhone: string = process.env.DEFAULT_SUPPLIER_PHONE || '0906106066';
+let defaultSupplierUserId: string = process.env.DEFAULT_SUPPLIER_ZALO_USER_ID || '';
+
+// Bảng giá chuẩn đang hoạt động (khôi phục từ DB hoặc mặc định)
+let activeStandardRoutes: StandardPriceRoute[] = [...DEFAULT_STANDARD_ROUTES];
 
 // PostgreSQL persistent storage (SURVIVES ALL RENDER RESTARTS & DEPLOYMENTS!)
 let dbPool: pg.Pool | null = null;
@@ -3275,6 +3295,20 @@ async function initDatabaseAndRestore() {
         value TEXT NOT NULL,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS standard_price_routes (
+        id VARCHAR(100) PRIMARY KEY,
+        route_code VARCHAR(50) NOT NULL UNIQUE,
+        name VARCHAR(255) NOT NULL,
+        origin_province VARCHAR(100) NOT NULL,
+        destination_province VARCHAR(100) NOT NULL,
+        service_code VARCHAR(50) NOT NULL,
+        service_name VARCHAR(255) NOT NULL,
+        estimated_transit_time VARCHAR(100) NOT NULL,
+        margin_percent NUMERIC DEFAULT 30,
+        tiers JSONB NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS ops_notified BOOLEAN DEFAULT FALSE;
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS ops_notified_at TIMESTAMP WITH TIME ZONE;
       CREATE INDEX IF NOT EXISTS idx_crm_messages_user_id ON crm_messages(user_id);
@@ -3368,21 +3402,75 @@ async function initDatabaseAndRestore() {
       console.log(`[Database] Successfully restored ${ordRes.rows.length} shipping orders from PostgreSQL!`);
     }
 
-    // 6. Restore DCE Ops Configuration from PostgreSQL
+    // 6. Restore DCE Ops & Default Supplier Configuration from PostgreSQL
     try {
-      const opsRes = await dbPool.query(`SELECT value FROM bot_settings WHERE key = 'dce_ops_user_id' LIMIT 1`);
-      if (opsRes.rows.length > 0 && opsRes.rows[0].value) {
-        dceOpsUserId = opsRes.rows[0].value;
-        console.log(`[Database] Restored DCE Ops Zalo User ID from PostgreSQL: ${dceOpsUserId}`);
-      } else {
-        const phoneMatch = await dbPool.query(`SELECT user_id FROM crm_customers WHERE phone LIKE '%934691766%' ORDER BY last_interaction DESC LIMIT 1`);
+      const settingsRes = await dbPool.query(`SELECT key, value FROM bot_settings WHERE key IN ('dce_ops_phone', 'dce_ops_user_id', 'default_supplier_name', 'default_supplier_phone', 'default_supplier_user_id')`);
+      const settingsMap = new Map<string, string>();
+      for (const row of settingsRes.rows) {
+        if (row.value) settingsMap.set(row.key, row.value);
+      }
+
+      if (settingsMap.get('dce_ops_phone')) dceOpsPhone = settingsMap.get('dce_ops_phone')!;
+      if (settingsMap.get('dce_ops_user_id')) dceOpsUserId = settingsMap.get('dce_ops_user_id')!;
+      if (settingsMap.get('default_supplier_name')) defaultSupplierName = settingsMap.get('default_supplier_name')!;
+      if (settingsMap.get('default_supplier_phone')) defaultSupplierPhone = settingsMap.get('default_supplier_phone')!;
+      if (settingsMap.get('default_supplier_user_id')) defaultSupplierUserId = settingsMap.get('default_supplier_user_id')!;
+
+      if (!dceOpsUserId && dceOpsPhone) {
+        const tailOps = dceOpsPhone.replace(/\D/g, '').slice(-9);
+        const phoneMatch = await dbPool.query(`SELECT user_id FROM crm_customers WHERE phone LIKE $1 ORDER BY last_interaction DESC LIMIT 1`, [`%${tailOps}%`]);
         if (phoneMatch.rows.length > 0 && phoneMatch.rows[0].user_id) {
           dceOpsUserId = phoneMatch.rows[0].user_id;
           console.log(`[Database] Auto-linked DCE Ops Zalo User ID from customer phone match: ${dceOpsUserId}`);
         }
       }
+
+      if (!defaultSupplierUserId && defaultSupplierPhone) {
+        const tailSup = defaultSupplierPhone.replace(/\D/g, '').slice(-9);
+        const supMatch = await dbPool.query(`SELECT user_id FROM crm_customers WHERE phone LIKE $1 ORDER BY last_interaction DESC LIMIT 1`, [`%${tailSup}%`]);
+        if (supMatch.rows.length > 0 && supMatch.rows[0].user_id) {
+          defaultSupplierUserId = supMatch.rows[0].user_id;
+          console.log(`[Database] Auto-linked Default Supplier Zalo User ID from customer phone match: ${defaultSupplierUserId}`);
+        }
+      }
+
+      console.log(`[Database] Routing Config: Ops=${dceOpsPhone} (linked=${!!dceOpsUserId}), Supplier=${defaultSupplierName} (${defaultSupplierPhone}, linked=${!!defaultSupplierUserId})`);
     } catch (e: any) {
-      console.warn('[Database] Could not restore DCE Ops settings:', e?.message);
+      console.warn('[Database] Could not restore DCE Ops & Supplier settings:', e?.message);
+    }
+
+    // 7. Seed & Restore Standard Price Routes (Pricing Engine)
+    try {
+      const routeRes = await dbPool.query(`SELECT * FROM standard_price_routes ORDER BY route_code ASC`);
+      if (routeRes.rows.length === 0) {
+        for (const r of DEFAULT_STANDARD_ROUTES) {
+          await dbPool.query(
+            `INSERT INTO standard_price_routes (id, route_code, name, origin_province, destination_province, service_code, service_name, estimated_transit_time, margin_percent, tiers, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+             ON CONFLICT (route_code) DO NOTHING;`,
+            [r.id, r.routeCode, r.name, r.originProvince, r.destinationProvince, r.serviceCode, r.serviceName, r.estimatedTransitTime, r.marginPercent, JSON.stringify(r.tiers), r.isActive]
+          );
+        }
+        activeStandardRoutes = [...DEFAULT_STANDARD_ROUTES];
+        console.log(`[Database] Seeded ${DEFAULT_STANDARD_ROUTES.length} default standard price routes into PostgreSQL.`);
+      } else {
+        activeStandardRoutes = routeRes.rows.map((row: any) => ({
+          id: row.id,
+          routeCode: row.route_code,
+          name: row.name,
+          originProvince: row.origin_province,
+          destinationProvince: row.destination_province,
+          serviceCode: row.service_code,
+          serviceName: row.service_name,
+          estimatedTransitTime: row.estimated_transit_time,
+          marginPercent: Number(row.margin_percent || 30),
+          tiers: row.tiers,
+          isActive: Boolean(row.is_active),
+        }));
+        console.log(`[Database] Loaded ${activeStandardRoutes.length} standard price routes from PostgreSQL.`);
+      }
+    } catch (e: any) {
+      console.warn('[Database] Could not restore standard price routes:', e?.message);
     }
   } catch (e: any) {
     console.error('[Database] Failed to init or restore from PostgreSQL:', e?.message);
@@ -3608,7 +3696,7 @@ export async function notifyDceOps(orderData: {
   opsUserId: string | null;
   error?: string;
 }> {
-  const opsPhone = DCE_OPS_PHONE;
+  const opsPhone = dceOpsPhone || DCE_OPS_PHONE;
   const opsNotificationText = generateOpsShipmentNotification(
     orderData.shippingInfo,
     orderData.trackingCode,
@@ -3617,17 +3705,31 @@ export async function notifyDceOps(orderData: {
     orderData.customerPhone
   );
 
-  // 1. Nếu chưa có dceOpsUserId, thử dò tìm trong crm_customers xem số 0934691766 đã từng tương tác chưa
+  // 1. Nếu chưa có dceOpsUserId, thử dò tìm trong crm_customers theo số opsPhone
   if (!dceOpsUserId && dbPool) {
     try {
+      const tailOps = opsPhone.replace(/\D/g, '').slice(-9);
       const res = await dbPool.query(
-        `SELECT user_id FROM crm_customers WHERE phone LIKE '%934691766%' OR name ILIKE '%ops%' ORDER BY last_interaction DESC LIMIT 1`
+        `SELECT user_id FROM crm_customers WHERE phone LIKE $1 OR name ILIKE '%ops%' ORDER BY last_interaction DESC LIMIT 1`,
+        [`%${tailOps}%`]
       );
       if (res.rows.length > 0 && res.rows[0].user_id) {
         dceOpsUserId = res.rows[0].user_id;
         console.log(`[DCE Ops] Auto-resolved dceOpsUserId from crm_customers: ${dceOpsUserId}`);
       }
     } catch (_) {}
+  }
+
+  // Nếu có đơn chưa có giá chuẩn & defaultSupplierUserId đã liên kết -> gửi song song cho Nhà cung cấp mặc định
+  const pricingCheck = calculateDCExpressPriceFromShippingInfo(orderData.shippingInfo, activeStandardRoutes);
+  if (!pricingCheck.hasStandardPrice && defaultSupplierUserId && defaultSupplierUserId !== dceOpsUserId) {
+    sendZaloOAReply(defaultSupplierUserId, opsNotificationText)
+      .then((ok) => {
+        if (ok) {
+          logZaloEvent('outgoing_reply', `Đã tự động gửi yêu cầu báo giá đơn ${orderData.trackingCode} tới Nhà cung cấp mặc định (${defaultSupplierName} - ${defaultSupplierPhone})`);
+        }
+      })
+      .catch(() => {});
   }
 
   // 2. Nếu đã liên kết Zalo user_id của Ops -> Bắn tin nhắn trực tiếp qua Zalo OA
@@ -3945,9 +4047,18 @@ app.get('/api/zalo/status', async (req: Request, res: Response) => {
       refreshTokenMasked: refreshToken ? `${refreshToken.slice(0, 6)}...${refreshToken.slice(-4)}` : null,
     },
     ops: {
-      phone: DCE_OPS_PHONE,
+      phone: dceOpsPhone,
       isLinked: Boolean(dceOpsUserId),
       userId: dceOpsUserId || null,
+    },
+    routing: {
+      opsPhone: dceOpsPhone,
+      opsUserId: dceOpsUserId || null,
+      isOpsLinked: Boolean(dceOpsUserId),
+      supplierName: defaultSupplierName,
+      supplierPhone: defaultSupplierPhone,
+      supplierUserId: defaultSupplierUserId || null,
+      isSupplierLinked: Boolean(defaultSupplierUserId),
     },
     stats: {
       activeSessions: zaloUserSessions.size,
@@ -4058,11 +4169,11 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
         /^(?:#ops|ops|#dceops|dce\s*ops)(?:\s+(0\d{9,10}|\+?84\d{9,10}))?$/i.test(trimmed) ||
         trimmed.toLowerCase() === '#ops' ||
         trimmed.toLowerCase() === 'ops' ||
-        trimmed.includes('0934691766');
+        (dceOpsPhone && trimmed.includes(dceOpsPhone));
 
       if (isOpsCommand) {
         dceOpsUserId = userId;
-        console.log(`[DCE Ops] Linked Zalo User ID: ${userId} to DCE Ops (${DCE_OPS_PHONE})`);
+        console.log(`[DCE Ops] Linked Zalo User ID: ${userId} to DCE Ops (${dceOpsPhone})`);
 
         if (dbPool) {
           dbPool.query(
@@ -4073,16 +4184,47 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
           ).catch(() => {});
 
           dbPool.query(
-            `UPDATE crm_customers SET name = 'DCE Ops (0934691766)', phone = '0934691766' WHERE user_id = $1;`,
-            [userId]
+            `UPDATE crm_customers SET name = $1, phone = $2 WHERE user_id = $3;`,
+            [`DCE Ops (${dceOpsPhone})`, dceOpsPhone, userId]
           ).catch(() => {});
         }
 
-        const reply = `✅ Đã kết nối tài khoản Zalo này với vai trò: ĐIỀU PHỐI VẬN HÀNH DCE (Hotline: ${DCE_OPS_PHONE})!\n\nTừ bây giờ, bất cứ khi nào có đơn vận chuyển mới (từ Web hoặc khách chốt qua Zalo OA), hệ thống sẽ TỰ ĐỘNG gửi thông tin báo giá chi tiết về Zalo này để bạn gửi ngay cho các Supplier/Nhà xe đối tác.\n\nCảm ơn bạn!`;
+        const reply = `✅ Đã kết nối tài khoản Zalo này với vai trò: ĐIỀU PHỐI VẬN HÀNH DCE (Hotline: ${dceOpsPhone})!\n\nTừ bây giờ, bất cứ khi nào có đơn vận chuyển mới (từ Web hoặc khách chốt qua Zalo OA), hệ thống sẽ TỰ ĐỘNG gửi thông tin báo giá chi tiết về Zalo này để bạn gửi ngay cho các Supplier/Nhà xe đối tác.\n\nCảm ơn bạn!`;
 
         await sendZaloOAReply(userId, reply);
         await recordCrmInteraction(userId, 'bot', reply, {}, 'Xác Nhận Kích Hoạt DCE Ops');
-        logZaloEvent('token_update', `Đã liên kết Zalo user_id ${userId} cho DCE Ops (${DCE_OPS_PHONE})`);
+        logZaloEvent('token_update', `Đã liên kết Zalo user_id ${userId} cho DCE Ops (${dceOpsPhone})`);
+        return;
+      }
+
+      const isSupplierCommand =
+        /^(?:#supplier|supplier|#ncc)(?:\s+(0\d{9,10}|\+?84\d{9,10}))?$/i.test(trimmed) ||
+        trimmed.toLowerCase() === '#supplier' ||
+        (defaultSupplierPhone && trimmed.includes(defaultSupplierPhone));
+
+      if (isSupplierCommand) {
+        defaultSupplierUserId = userId;
+        console.log(`[Default Supplier] Linked Zalo User ID: ${userId} to ${defaultSupplierName} (${defaultSupplierPhone})`);
+
+        if (dbPool) {
+          dbPool.query(
+            `INSERT INTO bot_settings (key, value, updated_at)
+             VALUES ('default_supplier_user_id', $1, NOW())
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();`,
+            [userId]
+          ).catch(() => {});
+
+          dbPool.query(
+            `UPDATE crm_customers SET name = $1, phone = $2 WHERE user_id = $3;`,
+            [`NCC: ${defaultSupplierName}`, defaultSupplierPhone, userId]
+          ).catch(() => {});
+        }
+
+        const reply = `✅ Đã kết nối tài khoản Zalo này với vai trò: NHÀ CUNG CẤP MẶC ĐỊNH — ${defaultSupplierName} (Zalo: ${defaultSupplierPhone})!\n\nCác đơn hàng ngoại lệ chưa có trong bảng giá chuẩn sẽ được tự động gửi tới tài khoản này để báo giá nhanh.\n\nCảm ơn Quý đối tác!`;
+
+        await sendZaloOAReply(userId, reply);
+        await recordCrmInteraction(userId, 'bot', reply, {}, 'Xác Nhận Kích Hoạt Nhà Cung Cấp Mặc Định');
+        logZaloEvent('token_update', `Đã liên kết Zalo user_id ${userId} cho Nhà cung cấp ${defaultSupplierName} (${defaultSupplierPhone})`);
         return;
       }
 
@@ -4330,10 +4472,151 @@ app.post('/api/orders/notify-ops', async (req: Request, res: Response) => {
 // GET /api/ops/status - Kiểm tra trạng thái liên kết Zalo của nhân sự điều phối DCE Ops
 app.get('/api/ops/status', async (_req: Request, res: Response) => {
   return res.json({
-    opsPhone: DCE_OPS_PHONE,
+    opsPhone: dceOpsPhone,
     opsUserId: dceOpsUserId || null,
     isLinked: Boolean(dceOpsUserId),
+    supplierName: defaultSupplierName,
+    supplierPhone: defaultSupplierPhone,
+    supplierUserId: defaultSupplierUserId || null,
+    isSupplierLinked: Boolean(defaultSupplierUserId),
   });
+});
+
+// GET /api/config/routing - Lấy cấu hình điều phối DCE Ops & Nhà cung cấp mặc định
+app.get('/api/config/routing', async (_req: Request, res: Response) => {
+  return res.json({
+    opsPhone: dceOpsPhone,
+    opsUserId: dceOpsUserId || null,
+    isOpsLinked: Boolean(dceOpsUserId),
+    supplierName: defaultSupplierName,
+    supplierPhone: defaultSupplierPhone,
+    supplierUserId: defaultSupplierUserId || null,
+    isSupplierLinked: Boolean(defaultSupplierUserId),
+  });
+});
+
+// POST /api/config/routing - Cập nhật cấu hình SĐT DCE Ops & Tên/SĐT Zalo Nhà cung cấp mặc định từ Web UI
+app.post('/api/config/routing', async (req: Request, res: Response) => {
+  const { opsPhone, supplierName, supplierPhone } = req.body || {};
+
+  if (typeof opsPhone === 'string' && opsPhone.trim()) {
+    dceOpsPhone = opsPhone.trim();
+  }
+  if (typeof supplierName === 'string' && supplierName.trim()) {
+    defaultSupplierName = supplierName.trim();
+  }
+  if (typeof supplierPhone === 'string' && supplierPhone.trim()) {
+    defaultSupplierPhone = supplierPhone.trim();
+  }
+
+  if (dbPool) {
+    try {
+      const pairs: Array<[string, string]> = [
+        ['dce_ops_phone', dceOpsPhone],
+        ['default_supplier_name', defaultSupplierName],
+        ['default_supplier_phone', defaultSupplierPhone],
+      ];
+      for (const [k, v] of pairs) {
+        await dbPool.query(
+          `INSERT INTO bot_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();`,
+          [k, v]
+        );
+      }
+    } catch (e: any) {
+      console.error('[API /api/config/routing] DB save error:', e?.message);
+    }
+  }
+
+  return res.json({
+    success: true,
+    opsPhone: dceOpsPhone,
+    opsUserId: dceOpsUserId || null,
+    isOpsLinked: Boolean(dceOpsUserId),
+    supplierName: defaultSupplierName,
+    supplierPhone: defaultSupplierPhone,
+    supplierUserId: defaultSupplierUserId || null,
+    isSupplierLinked: Boolean(defaultSupplierUserId),
+    message: 'Đã lưu cấu hình Điều phối Ops & Nhà cung cấp mặc định thành công!',
+  });
+});
+
+// POST /api/pricing/calculate - Tính cước chuẩn tự động dựa trên Bảng giá chuẩn DC Express (Giai đoạn 1)
+app.post('/api/pricing/calculate', async (req: Request, res: Response) => {
+  try {
+    const { shippingInfo } = req.body || {};
+    if (!shippingInfo) {
+      return res.status(400).json({ error: 'shippingInfo is required' });
+    }
+    const result = calculateDCExpressPriceFromShippingInfo(shippingInfo, activeStandardRoutes);
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message });
+  }
+});
+
+// GET /api/pricing/routes - Lấy danh sách các tuyến trong Bảng giá chuẩn
+app.get('/api/pricing/routes', async (_req: Request, res: Response) => {
+  return res.json({ success: true, routes: activeStandardRoutes });
+});
+
+// POST /api/pricing/routes - Thêm hoặc cập nhật tuyến trong Bảng giá chuẩn
+app.post('/api/pricing/routes', async (req: Request, res: Response) => {
+  try {
+    const route: StandardPriceRoute = req.body;
+    if (!route || !route.routeCode || !route.originProvince || !route.destinationProvince) {
+      return res.status(400).json({ error: 'routeCode, originProvince, destinationProvince are required' });
+    }
+    const id = route.id || `route-${route.routeCode.toLowerCase()}`;
+    const normalized: StandardPriceRoute = {
+      ...route,
+      id,
+      marginPercent: typeof route.marginPercent === 'number' ? route.marginPercent : 30,
+      isActive: route.isActive !== false,
+    };
+
+    const idx = activeStandardRoutes.findIndex((r) => r.routeCode === normalized.routeCode);
+    if (idx >= 0) {
+      activeStandardRoutes[idx] = normalized;
+    } else {
+      activeStandardRoutes.push(normalized);
+    }
+
+    if (dbPool) {
+      await dbPool.query(
+        `INSERT INTO standard_price_routes (id, route_code, name, origin_province, destination_province, service_code, service_name, estimated_transit_time, margin_percent, tiers, is_active, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+         ON CONFLICT (route_code) DO UPDATE
+         SET name = EXCLUDED.name,
+             origin_province = EXCLUDED.origin_province,
+             destination_province = EXCLUDED.destination_province,
+             service_code = EXCLUDED.service_code,
+             service_name = EXCLUDED.service_name,
+             estimated_transit_time = EXCLUDED.estimated_transit_time,
+             margin_percent = EXCLUDED.margin_percent,
+             tiers = EXCLUDED.tiers,
+             is_active = EXCLUDED.is_active,
+             updated_at = NOW();`,
+        [
+          normalized.id,
+          normalized.routeCode,
+          normalized.name,
+          normalized.originProvince,
+          normalized.destinationProvince,
+          normalized.serviceCode,
+          normalized.serviceName,
+          normalized.estimatedTransitTime,
+          normalized.marginPercent,
+          JSON.stringify(normalized.tiers),
+          normalized.isActive,
+        ]
+      );
+    }
+
+    return res.json({ success: true, route: normalized, routes: activeStandardRoutes });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message });
+  }
 });
 
 // POST /api/ops/bind - Liên kết thủ công Zalo User ID cho DCE Ops

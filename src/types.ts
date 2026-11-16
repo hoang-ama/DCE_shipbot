@@ -47,6 +47,16 @@ export interface ChatMessage {
   quickReplies?: string[];
 }
 
+export interface RoutingConfig {
+  opsPhone: string;
+  opsUserId?: string | null;
+  isOpsLinked?: boolean;
+  supplierName: string;
+  supplierPhone: string;
+  supplierUserId?: string | null;
+  isSupplierLinked?: boolean;
+}
+
 export interface OrderRecord {
   id: string;
   trackingCode: string;

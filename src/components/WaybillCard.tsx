@@ -17,16 +17,23 @@ import {
   ArrowRightLeft,
   Clock,
   Send,
+  Calculator,
 } from 'lucide-react';
-import { ShippingInfo } from '../types';
+import { ShippingInfo, RoutingConfig } from '../types';
 import {
   calculateVolumetricWeight,
   generateShipmentTextSummary,
   generateOpsShipmentNotification,
   DCE_OPS_PHONE,
+  DEFAULT_SUPPLIER_NAME,
+  DEFAULT_SUPPLIER_PHONE,
   checkHasWardCommune,
   isValidVNPhone,
 } from '../utils/logistics';
+import {
+  calculateDCExpressPriceFromShippingInfo,
+  formatVnd,
+} from '../utils/pricingEngine';
 
 const COMMON_CARGO_CATEGORIES = [
   'Hoa quả',
@@ -53,6 +60,7 @@ interface WaybillCardProps {
   onUpdateInfo: (updated: ShippingInfo) => void;
   onConfirmOrder: () => void;
   trackingCode: string;
+  routingConfig?: RoutingConfig;
 }
 
 export const WaybillCard: React.FC<WaybillCardProps> = ({
@@ -60,11 +68,22 @@ export const WaybillCard: React.FC<WaybillCardProps> = ({
   onUpdateInfo,
   onConfirmOrder,
   trackingCode,
+  routingConfig,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editableInfo, setEditableInfo] = useState<ShippingInfo>(shippingInfo);
   const [copied, setCopied] = useState(false);
   const [opsNotified, setOpsNotified] = useState(false);
+
+  const opsPhone = routingConfig?.opsPhone || DCE_OPS_PHONE;
+  const supplierName = routingConfig?.supplierName || DEFAULT_SUPPLIER_NAME;
+  const supplierPhone = routingConfig?.supplierPhone || DEFAULT_SUPPLIER_PHONE;
+
+  // Tính giá chuẩn tự động theo thời gian thực (Pricing Engine - Giai đoạn 1)
+  const pricingResult = React.useMemo(
+    () => calculateDCExpressPriceFromShippingInfo(shippingInfo),
+    [shippingInfo]
+  );
 
   // Sync state if external changes occur while not in edit mode
   React.useEffect(() => {
@@ -96,7 +115,7 @@ export const WaybillCard: React.FC<WaybillCardProps> = ({
   };
 
   const handleSendToOps = async () => {
-    const opsText = generateOpsShipmentNotification(shippingInfo, trackingCode, 'web');
+    const opsText = generateOpsShipmentNotification(shippingInfo, trackingCode, 'web', opsPhone);
     navigator.clipboard.writeText(opsText);
     setOpsNotified(true);
     setTimeout(() => setOpsNotified(false), 3000);
@@ -115,7 +134,7 @@ export const WaybillCard: React.FC<WaybillCardProps> = ({
       }).catch(() => {});
     } catch (_) {}
 
-    window.open(`https://zalo.me/${DCE_OPS_PHONE}`, '_blank');
+    window.open(`https://zalo.me/${opsPhone}`, '_blank');
   };
 
   return (
@@ -816,6 +835,61 @@ export const WaybillCard: React.FC<WaybillCardProps> = ({
             </div>
           )}
         </div>
+
+        {/* 5. Bảng Tính Cước Chuẩn Tự Động (Pricing Engine - Giai đoạn 1) */}
+        {(shippingInfo.sender.address || shippingInfo.receiver.address) && (
+          <div className={`p-3.5 rounded-xl border text-xs space-y-2 ${
+            pricingResult.hasStandardPrice
+              ? 'bg-emerald-50/60 border-emerald-200'
+              : 'bg-amber-50/60 border-amber-200'
+          }`}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                <Calculator className={`w-4 h-4 ${pricingResult.hasStandardPrice ? 'text-emerald-600' : 'text-amber-600'}`} />
+                <span>Tự Động Tính Cước (Pricing Engine)</span>
+              </div>
+              {pricingResult.senderProvince && pricingResult.receiverProvince && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700">
+                  {pricingResult.senderProvince} ↔ {pricingResult.receiverProvince}
+                </span>
+              )}
+            </div>
+
+            {pricingResult.hasStandardPrice && pricingResult.recommendedServices.length > 0 ? (
+              <div className="space-y-1.5">
+                {pricingResult.recommendedServices.map((svc) => (
+                  <div
+                    key={svc.routeCode}
+                    className="p-2.5 bg-white rounded-lg border border-emerald-200/80 flex items-center justify-between gap-2 shadow-2xs"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-800 truncate">{svc.serviceName}</div>
+                      <div className="text-[10.5px] text-slate-500">
+                        {svc.estimatedTransitTime} • Tính cước: <strong>{svc.chargeableWeightKg} kg</strong>
+                        {svc.surchargesTotalVnd > 0 ? ` (+${formatVnd(svc.surchargesTotalVnd)} phụ phí)` : ''}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-extrabold text-emerald-700">
+                        {formatVnd(svc.customerQuoteVnd)}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Gốc {formatVnd(svc.baseCostVnd)} (+{svc.marginPercent}%)
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-[11px] text-amber-800 leading-relaxed">
+                <div>{pricingResult.reason}</div>
+                <div className="mt-1 font-medium text-slate-700">
+                  👉 Chuyển <strong>DCE Ops ({opsPhone})</strong> &amp; NCC <strong>{supplierName} ({supplierPhone})</strong> báo giá.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Footer Sticky Actions */}
@@ -829,17 +903,17 @@ export const WaybillCard: React.FC<WaybillCardProps> = ({
               ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 active:scale-[0.99]'
               : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
           }`}
-          title="Bắn thông tin đơn hàng tới Zalo DCE Ops (0934691766) để gửi Supplier báo giá"
+          title={`Bắn thông tin đơn hàng tới Zalo DCE Ops (${opsPhone}) để gửi Supplier báo giá`}
         >
           {opsNotified ? (
             <>
               <Check className="w-4 h-4 text-emerald-600" />
-              <span className="text-emerald-700">Đã chép báo giá & mở Zalo 0934691766!</span>
+              <span className="text-emerald-700">Đã chép báo giá & mở Zalo {opsPhone}!</span>
             </>
           ) : (
             <>
               <Send className="w-4 h-4 text-blue-600" />
-              <span>Bắn Zalo cho DCE Ops (0934691766) để báo giá</span>
+              <span>Bắn Zalo cho DCE Ops ({opsPhone}) để báo giá</span>
             </>
           )}
         </button>

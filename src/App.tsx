@@ -12,11 +12,14 @@ import { OrderHistoryModal } from './components/OrderHistoryModal';
 import { SuccessOrderModal } from './components/SuccessOrderModal';
 import { ZaloStatusModal } from './components/ZaloStatusModal';
 import { CrmModal } from './components/CrmModal';
-import { ChatMessage, ShippingInfo, OrderRecord } from './types';
+import { ChatMessage, ShippingInfo, OrderRecord, RoutingConfig } from './types';
 import {
   INITIAL_SHIPPING_INFO,
   evaluateCompleteness,
   generateTrackingCode,
+  DCE_OPS_PHONE,
+  DEFAULT_SUPPLIER_NAME,
+  DEFAULT_SUPPLIER_PHONE,
 } from './utils/logistics';
 
 const STORAGE_ORDERS_KEY = 'shipbot_saved_orders_v1';
@@ -34,6 +37,11 @@ export default function App() {
   const [isZaloOpen, setIsZaloOpen] = useState<boolean>(false);
   const [isZaloConnected, setIsZaloConnected] = useState<boolean | null>(null);
   const [isCrmOpen, setIsCrmOpen] = useState<boolean>(false);
+  const [routingConfig, setRoutingConfig] = useState<RoutingConfig>({
+    opsPhone: DCE_OPS_PHONE,
+    supplierName: DEFAULT_SUPPLIER_NAME,
+    supplierPhone: DEFAULT_SUPPLIER_PHONE,
+  });
 
   // Saved orders from localStorage
   const [savedOrders, setSavedOrders] = useState<OrderRecord[]>(() => {
@@ -86,6 +94,16 @@ export default function App() {
       .catch((err) => {
         console.warn('Could not contact /api/orders, keeping localStorage:', err);
       });
+
+    // Fetch dynamic Ops & Default Supplier routing config
+    fetch('/api/config/routing')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.opsPhone) {
+          setRoutingConfig(data);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Save orders to localStorage on change
@@ -311,6 +329,7 @@ export default function App() {
               onUpdateInfo={handleUpdateShippingInfo}
               onConfirmOrder={handleConfirmOrder}
               trackingCode={trackingCode}
+              routingConfig={routingConfig}
             />
           </div>
         </div>
@@ -330,6 +349,7 @@ export default function App() {
         onDeleteOrder={handleDeleteOrder}
         onClearAll={handleClearAllOrders}
         onSelectOrder={handleSelectOrderFromHistory}
+        routingConfig={routingConfig}
       />
 
       <SuccessOrderModal
@@ -338,12 +358,14 @@ export default function App() {
         shippingInfo={shippingInfo}
         trackingCode={trackingCode}
         onNewOrder={handleReset}
+        routingConfig={routingConfig}
       />
 
       <ZaloStatusModal
         isOpen={isZaloOpen}
         onClose={() => setIsZaloOpen(false)}
         onStatusUpdate={(connected) => setIsZaloConnected(connected)}
+        onRoutingUpdate={(cfg) => setRoutingConfig(cfg)}
       />
 
       <CrmModal

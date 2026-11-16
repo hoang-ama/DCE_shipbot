@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, History, Trash2, Copy, Check, ExternalLink, Package, Send } from 'lucide-react';
-import { OrderRecord } from '../types';
+import { OrderRecord, RoutingConfig } from '../types';
 import { generateShipmentTextSummary, generateOpsShipmentNotification, DCE_OPS_PHONE } from '../utils/logistics';
 
 interface OrderHistoryModalProps {
@@ -10,6 +10,7 @@ interface OrderHistoryModalProps {
   onDeleteOrder: (id: string) => void;
   onClearAll: () => void;
   onSelectOrder: (order: OrderRecord) => void;
+  routingConfig?: RoutingConfig;
 }
 
 export const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
@@ -19,11 +20,14 @@ export const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
   onDeleteOrder,
   onClearAll,
   onSelectOrder,
+  routingConfig,
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [opsNotifiedId, setOpsNotifiedId] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  const opsPhone = routingConfig?.opsPhone || DCE_OPS_PHONE;
 
   const handleCopy = (order: OrderRecord) => {
     const text = generateShipmentTextSummary(order.shippingInfo, order.trackingCode);
@@ -33,7 +37,7 @@ export const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
   };
 
   const handleSendOps = (order: OrderRecord) => {
-    const text = generateOpsShipmentNotification(order.shippingInfo, order.trackingCode, order.source);
+    const text = generateOpsShipmentNotification(order.shippingInfo, order.trackingCode, order.source, opsPhone);
     navigator.clipboard.writeText(text);
     setOpsNotifiedId(order.id);
     setTimeout(() => setOpsNotifiedId(null), 2500);
@@ -53,7 +57,7 @@ export const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
       }).catch(() => {});
     } catch (_) {}
 
-    window.open(`https://zalo.me/${DCE_OPS_PHONE}`, '_blank');
+    window.open(`https://zalo.me/${opsPhone}`, '_blank');
   };
 
   return (

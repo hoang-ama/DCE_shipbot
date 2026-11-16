@@ -1839,15 +1839,19 @@ ${info.cargo.specialNotes ? `- Ghi chú chi tiết: ${info.cargo.specialNotes}` 
 🚀 Tạo tự động qua ShipBot AI Assistant`;
 }
 
-// Số điện thoại Zalo của nhân sự điều phối vận hành Đi Chung Express (DCE Ops)
+// Số điện thoại Zalo mặc định của nhân sự điều phối vận hành (DCE Ops) & Nhà cung cấp mặc định
 export const DCE_OPS_PHONE = '0934691766';
+export const DEFAULT_SUPPLIER_NAME = 'Dichung Express';
+export const DEFAULT_SUPPLIER_PHONE = '0906106066';
 
-// Mẫu thông điệp báo giá đơn gửi tới Zalo DCE Ops (0934691766) để Ops gửi tiếp cho các Supplier/Nhà xe đối tác
+// Mẫu thông điệp báo giá đơn gửi tới Zalo DCE Ops để Ops gửi tiếp cho các Supplier/Nhà xe đối tác
 export function generateOpsShipmentNotification(
   info: ShippingInfo,
   trackingCode?: string,
-  source?: string
+  _source?: string,
+  customOpsPhone?: string
 ): string {
+  const opsPhone = customOpsPhone?.trim() || DCE_OPS_PHONE;
   const code = trackingCode || 'VN-LOG-XXXX';
   const senderAddr = info?.sender?.address?.trim() || '(Chưa có)';
   const receiverAddr = info?.receiver?.address?.trim() || '(Chưa có)';
@@ -1881,5 +1885,5 @@ export function generateOpsShipmentNotification(
    - ${deliveryTime}
 ---------------------------------------------
 ⚡ Kính gửi Quý Đối Tác / Nhà Xe báo giá vận chuyển tuyến này giúp Đi Chung Express.
-📞 Hotline Điều phối DCE Ops: ${DCE_OPS_PHONE}`;
+📞 Hotline Điều phối DCE Ops: ${opsPhone}`;
 }
