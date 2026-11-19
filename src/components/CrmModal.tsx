@@ -29,6 +29,7 @@ export interface CrmCustomerItem {
   first_interaction: string;
   last_interaction: string;
   last_message: string;
+  human_takeover?: boolean;
   shipping_info: any;
 }
 
@@ -150,6 +151,24 @@ export const CrmModal: React.FC<CrmModalProps> = ({
 
   const selectedCustomer = customers.find((c) => c.user_id === selectedUserId);
 
+  const handleToggleAi = async (userId: string, currentlyPaused: boolean) => {
+    try {
+      const res = await fetch(`/api/crm/customers/${encodeURIComponent(userId)}/ai-toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ humanTakeover: !currentlyPaused }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setCustomers((prev) =>
+          prev.map((c) => (c.user_id === userId ? { ...c, human_takeover: !currentlyPaused } : c))
+        );
+      }
+    } catch (e) {
+      console.error('Failed to toggle AI handover:', e);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -263,7 +282,14 @@ export const CrmModal: React.FC<CrmModalProps> = ({
                       {/* Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-1 mb-0.5">
-                          <h4 className="font-bold text-xs text-slate-800 truncate">{c.name}</h4>
+                          <h4 className="font-bold text-xs text-slate-800 truncate flex items-center gap-1">
+                            <span>{c.name}</span>
+                            {c.human_takeover && (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[9px] font-bold shrink-0">
+                                Handover
+                              </span>
+                            )}
+                          </h4>
                           <span className="text-[10px] text-slate-400 shrink-0">
                             {new Date(c.last_interaction).toLocaleTimeString('vi-VN', {
                               hour: '2-digit',
@@ -328,22 +354,50 @@ export const CrmModal: React.FC<CrmModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Action: Nạp đơn vào Waybill */}
-                  {selectedCustomer.shipping_info && (
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
-                      onClick={() => {
-                        if (onLoadOrderToWaybill) {
-                          onLoadOrderToWaybill(selectedCustomer.shipping_info);
-                          onClose();
-                        }
-                      }}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5"
-                      title="Nạp dữ liệu đơn hàng vào Phiếu Vận Đơn bên ngoài app"
+                      onClick={() => handleToggleAi(selectedCustomer.user_id, Boolean(selectedCustomer.human_takeover))}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer ${
+                        selectedCustomer.human_takeover
+                          ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300'
+                          : 'bg-slate-200 hover:bg-slate-300 text-slate-800'
+                      }`}
+                      title={
+                        selectedCustomer.human_takeover
+                          ? 'Nhân viên đang tiếp quản (AI đã dừng). Bấm để bật lại AI.'
+                          : 'AI đang tự động trả lời. Bấm để tạm dừng AI và tiếp quản thủ công.'
+                      }
                     >
-                      <Package className="w-3.5 h-3.5" />
-                      Nạp Đơn Vào Phiếu
+                      {selectedCustomer.human_takeover ? (
+                        <>
+                          <UserCheck className="w-3.5 h-3.5 text-amber-700" />
+                          <span>Đang dừng AI (Bật lại AI)</span>
+                        </>
+                      ) : (
+                        <>
+                          <Bot className="w-3.5 h-3.5 text-blue-600" />
+                          <span>AI đang bật (Dừng AI)</span>
+                        </>
+                      )}
                     </button>
-                  )}
+
+                    {/* Action: Nạp đơn vào Waybill */}
+                    {selectedCustomer.shipping_info && (
+                      <button
+                        onClick={() => {
+                          if (onLoadOrderToWaybill) {
+                            onLoadOrderToWaybill(selectedCustomer.shipping_info);
+                            onClose();
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
+                        title="Nạp dữ liệu đơn hàng vào Phiếu Vận Đơn bên ngoài app"
+                      >
+                        <Package className="w-3.5 h-3.5" />
+                        Nạp Đơn Vào Phiếu
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Extracted Shipping Info Mini-Card */}

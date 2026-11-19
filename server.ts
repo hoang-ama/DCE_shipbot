@@ -46,16 +46,19 @@ Bạn có chuyên môn sâu về vận tải hàng hóa tại Việt Nam, nắm 
 
 VĂN PHONG VÀ CÁCH ỨNG XỬ CỦA NGƯỜI VIỆT NAM (QUAN TRỌNG):
 - Luôn xưng hô đúng mực người Việt: xưng "em", gọi khách hàng là "anh/chị".
-- Giọng văn tự nhiên, nhanh nhạy, ân cần, lịch sự, đúng phong thái nhân viên dịch vụ khách hàng chuyên nghiệp tại Việt Nam.
-- TUYỆT ĐỐI KHÔNG lặp đi lặp lại máy móc cụm từ "Dạ em đã ghi nhận thông tin." ở mỗi câu trả lời như một con robot vô hồn.
+- Giọng văn tự nhiên, gần gũi như người thật, ngắn gọn dễ hiểu.
+- HẠN CHẾ TỪ "DẠ": Bớt dùng từ "Dạ" trong các câu hỏi hoặc câu chào. CHỈ dùng "Dạ" khi xác nhận (confirm) hoặc ghi nhận thông tin mới khách vừa cung cấp (VD: "Dạ em đã lưu điểm lấy...", "Dạ em đã nhận đủ thông tin..."). Không mở đầu mọi câu hỏi bằng "Dạ".
+- KHÔNG LẶP LẠI TỪNG TỪ MỘT CÂU HỎI QUÁ 2 LẦN: Điều chỉnh cách hỏi linh hoạt, ngắn gọn hoặc giải thích rõ hơn cho khách dễ trả lời. Nếu phải hỏi lại lần 2 cùng một mục còn thiếu, ưu tiên mẫu tự nhiên: "Hiện em vẫn chưa có thông tin ..., anh/chị vui lòng cung cấp để em tiếp tục tư vấn nhé."
+- LINH HOẠT THỨ TỰ HỎI: Nếu khách chưa có hoặc chưa cho địa chỉ ngay, có thể linh hoạt chuyển sang hỏi thông tin hàng hóa (loại hàng, cân nặng, kích thước) hoặc thời gian trước rồi mới quay lại xin địa chỉ sau, tránh ép hỏi địa chỉ làm khách khó chịu.
+- TUYỆT ĐỐI KHÔNG lặp lại máy móc cụm từ "Dạ em đã ghi nhận thông tin." ở mỗi câu trả lời.
 - Hiểu thói quen nhắn tin của người Việt:
   * Viết tắt: "hn" (Hà Nội), "sg" / "hcm" (TP. Hồ Chí Minh), "đn" (Đà Nẵng), "hp" (Hải Phòng), "qn" (Quảng Ninh), "q1" (Quận 1), "kcn" (Khu công nghiệp), "kđt" (Khu đô thị), "bx" (Bến xe), "tttm" (Trung tâm thương mại), "chung cư", "sảnh", "ngõ"...
   * Nhắn không dấu: "lay o hai ba trung giao pho yen thai nguyen", "hoa qua 10kg", "hoa toc trong ngay"...
-  * Nhắn từng mẩu thông tin rời rạc qua từng lượt: lượt 1 nói chỗ lấy, lượt 2 nói chỗ giao, lượt 3 nói hàng, lượt 4 nói thời gian.
+  * Nhắn từng mẩu thông tin rời rạc qua từng lượt: lượt 1 nói chỗ lấy, lượt 2 nói chỗ giao, lượt 3 nói hàng (thậm chí chỉ nhắn 1 từ như "đèn", "quần áo"), lượt 4 nói thời gian.
   * Phân biệt rõ các từ ngữ định hướng:
     - "lấy ở...", "gửi từ...", "từ..." => Điểm lấy hàng (sender.address).
-    - "giao...", "gửi đến...", "gửi về...", "nhận ở...", "vào SG", "ra HN", "đi..." => Điểm giao hàng (receiver.address).
-    - "hỏa tốc trong ngày", "trong ngày luôn", "sáng mai", "chiều nay", "hẹn 15h" => Thời gian giao nhận (deliveryTime). TUYỆT ĐỐI KHÔNG gán nhầm vào địa chỉ!
+    - "giao đến...", "gửi đến...", "gửi về...", "nhận ở...", "xuống...", "lên...", "ra...", "vào SG", "ra HN", "đi..." => Điểm giao hàng (receiver.address).
+    - "hỏa tốc trong ngày", "trong ngày luôn", "sáng mai", "chiều nay", "sang hôm sau", "qua lấy, giao trong ngày hoặc sang hôm sau cũng đc" => Thời gian giao nhận (deliveryTime). TUYỆT ĐỐI KHÔNG BAO GIỜ gán nhầm các câu chỉ thời gian/hành động lấy-giao vào địa chỉ!
 
 TIN NHẮN ĐẦU TIÊN CỦA ĐI CHUNG:
 "Bên em chuyên về dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Vui lòng cung cấp thông tin địa chỉ giao nhận để bên em tư vấn"
@@ -213,9 +216,12 @@ function detectDeliveryTime(text: string | undefined | null): string | null {
   const trimmed = text.trim();
   const lower = trimmed.toLowerCase();
 
-  // 1. High priority: "hỏa tốc trong ngày", "giao nhận hỏa tốc trong ngày", "trong ngày luôn"
+  // 1. High priority: "hỏa tốc trong ngày", "giao nhận hỏa tốc trong ngày", "trong ngày luôn", "trong ngày hoặc sang hôm sau"
   if (/(?:giao\s+nhận\s+)?hỏa\s+tốc\s+trong\s+ngày(?:\s+luôn)?/i.test(lower)) {
     return 'Hỏa tốc trong ngày';
+  }
+  if (/(?:trong\s+ngày|hôm\s+nay)\s+(?:hoặc|hay)\s+(?:sang\s+)?(?:ngày\s+)?(?:hôm\s+sau|mai|ngày\s+mai)/i.test(lower)) {
+    return 'Trong ngày hoặc sang hôm sau';
   }
   if (/(?:giao\s+nhận\s+)?hỏa\s+tốc(?:\s+(?:luôn|ngay|nhé|ạ))?/i.test(lower) && !/(?:quận|phường|xã|đường|tòa)/i.test(lower)) {
     if (/(?:trong\s+ngày|hôm\s+nay)/i.test(lower)) {
@@ -229,9 +235,14 @@ function detectDeliveryTime(text: string | undefined | null): string | null {
   if (/(?:trong\s+)?hôm\s+nay(?:\s+(?:luôn|ngay))?/i.test(lower) && !/(?:quận|phường|xã|đường|tòa)/i.test(lower)) {
     return 'Trong hôm nay';
   }
+  if (/(?:sang\s+)?(?:ngày\s+)?(?:hôm\s+sau|ngày\s+kia|ngày\s+mốt|cuối\s+tuần)(?:\s+(?:cũng\s+(?:được|đc)|nhé|ạ))?/i.test(lower) && !/(?:quận|phường|xã|đường|tòa)/i.test(lower)) {
+    if (/hôm\s+sau/i.test(lower)) return 'Sang hôm sau';
+    if (/ngày\s+kia/i.test(lower)) return 'Ngày kia';
+    if (/cuối\s+tuần/i.test(lower)) return 'Cuối tuần';
+  }
 
   // Specific prefix pattern with required time preposition
-  const prefixMatch = text.match(/(?:giao|nhận)\s+(?:vào\s+|lúc\s+|khoảng\s+|tầm\s+)?((?:sáng|trưa|chiều|tối)?\s*(?:hôm\s*nay|nay|mai|ngày\s*mai|ngày\s*mốt)?\s*(?:lúc|khoảng|tầm)?\s*\d{1,2}(?:h|\s*giờ)(?:\s*\d{1,2}(?:p|phút)?)?|(?:trong\s*)?giờ\s*hành\s*chính|sáng\s*mai|chiều\s*mai|tối\s*mai|trưa\s*mai|sáng\s*nay|chiều\s*nay|tối\s*nay|ngày\s*mai|ngày\s*mốt|ngay|luôn|càng\s*sớm\s*càng\s*tốt)/i);
+  const prefixMatch = text.match(/(?:giao|nhận)\s+(?:vào\s+|lúc\s+|khoảng\s+|tầm\s+)?((?:sáng|trưa|chiều|tối)?\s*(?:hôm\s*nay|hôm\s*sau|nay|mai|ngày\s*mai|ngày\s*mốt|ngày\s*kia)?\s*(?:lúc|khoảng|tầm)?\s*\d{1,2}(?:h|\s*giờ)(?:\s*\d{1,2}(?:p|phút)?)?|(?:trong\s*)?giờ\s*hành\s*chính|sáng\s*mai|chiều\s*mai|tối\s*mai|trưa\s*mai|sáng\s*nay|chiều\s*nay|tối\s*nay|ngày\s*mai|ngày\s*mốt|ngày\s*kia|sang\s*hôm\s*sau|hôm\s*sau|ngay|luôn|càng\s*sớm\s*càng\s*tốt)/i);
   if (prefixMatch && prefixMatch[1]) {
     const candidate = prefixMatch[1].trim();
     if (!/(?:chợ|tòa|landmark|lanmark|keangnam|bến\s*thành|phường|quận|đường)/i.test(candidate)) {
@@ -240,7 +251,7 @@ function detectDeliveryTime(text: string | undefined | null): string | null {
   }
 
   // Common timing keywords
-  const keywordMatch = text.match(/\b((?:sáng|trưa|chiều|tối)?\s*(?:hôm\s*nay|nay|mai|ngày\s*mai|ngày\s*mốt|mốt)?\s*(?:lúc|khoảng|tầm)?\s*\d{1,2}(?:h|\s*giờ)(?:\s*\d{1,2}(?:p|phút)?)?|(?:trong\s*)?giờ\s*hành\s*chính|sáng\s*mai|chiều\s*mai|tối\s*mai|trưa\s*mai|sáng\s*nay|chiều\s*nay|tối\s*nay|ngày\s*mai|ngày\s*mốt|càng\s*sớm\s*càng\s*tốt|giao\s*ngay|giao\s*luôn|ngay\s*bây\s*giờ|trước\s*\d{1,2}h|sau\s*\d{1,2}h|ngày\s*\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)\b/i);
+  const keywordMatch = text.match(/\b((?:sáng|trưa|chiều|tối)?\s*(?:hôm\s*nay|hôm\s*sau|nay|mai|ngày\s*mai|ngày\s*mốt|ngày\s*kia|mốt)?\s*(?:lúc|khoảng|tầm)?\s*\d{1,2}(?:h|\s*giờ)(?:\s*\d{1,2}(?:p|phút)?)?|(?:trong\s*)?giờ\s*hành\s*chính|sáng\s*mai|chiều\s*mai|tối\s*mai|trưa\s*mai|sáng\s*nay|chiều\s*nay|tối\s*nay|ngày\s*mai|ngày\s*mốt|ngày\s*kia|sang\s*hôm\s*sau|hôm\s*sau|càng\s*sớm\s*càng\s*tốt|giao\s*ngay|giao\s*luôn|ngay\s*bây\s*giờ|trước\s*\d{1,2}h|sau\s*\d{1,2}h|lúc\s*nào\s*cũng\s*(?:được|đc)|ngày\s*\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)\b/i);
   if (keywordMatch && keywordMatch[1]) {
     const candidate = keywordMatch[1].trim();
     if (!/(?:chợ|tòa|landmark|lanmark|keangnam|bến\s*thành|phường|quận|đường)/i.test(candidate)) {
@@ -250,6 +261,9 @@ function detectDeliveryTime(text: string | undefined | null): string | null {
 
   return null;
 }
+
+// Shared Vietnamese word-boundary matcher for address keywords (avoids JS `\b` bug on Unicode chars like `đ`, `ã`, `ố`, `ợ`)
+const ADDR_KEYWORD_REGEX = /(?:^|[\s,.;:/()?!])(?:số\s+\d+|phố|đường|ngõ|ngách|phường|xã|thị\s*trấn|quận|huyện|tỉnh|thành\s*phố|kđt|tòa|chung\s+cư|chợ|bến|sân\s+bay|học\s+viện|trường|bệnh\s+viện|khu\s+đô\s+thị)(?=$|[\s,.;:/()?!])/i;
 
 // Check if string is NOT a valid address (conversational fillers, pure pronouns, delivery times, weights, dimensions, or cargo names)
 function isNotValidAddress(text: string | undefined | null): boolean {
@@ -261,20 +275,22 @@ function isNotValidAddress(text: string | undefined | null): boolean {
   // If text starts with conversational pronouns + verbs: "anh cần", "tôi muốn", etc.
   if (/^(?:anh|em|chị|tôi|mình|bác|chú|cô)\s+(?:cần|muốn|nhờ|hỏi)/i.test(lower)) return true;
 
-  // Pure delivery time or service speed expressions
-  if (
-    /^(?:giao\s+nhận|giao\s+hàng|nhận\s+hàng|hỏa\s+tốc|trong\s+ngày|luôn|ngay|giao\s+nhận\s+hỏa\s+tốc)$/i.test(lower) ||
-    /^(?:nhận\s+hỏa\s+tốc|giao\s+hỏa\s+tốc|hỏa\s+tốc\s+trong\s+ngày|hỏa\s+tốc\s+trong\s+ngày\s+luôn)$/i.test(lower) ||
-    /^(?:nhận\s+hỏa\s+tốc\s+trong\s+ngày|nhận\s+hỏa\s+tốc\s+trong\s+ngày\s+luôn)$/i.test(lower)
-  ) {
-    return true;
-  }
+  const hasAddrKeyword = ADDR_KEYWORD_REGEX.test(lower);
 
-  const hasAddrKeyword = /(?:số\s+\d+|\bphố\b|\bđường\b|\bngõ\b|\bngách\b|\bphường\b|\bxã\b|\bquận\b|\bhuyện\b|\btỉnh\b|\bkđt\b|\btòa\b|\bchung\s+cư\b|\bchợ\b|\bbến\b|\bsân\s+bay\b|\bkhu\s+đô\s+thị\b)/i.test(lower);
-
-  // Pure delivery time without address words
-  if (detectDeliveryTime(cleaned) && !hasAddrKeyword) {
-    return true;
+  // Pure action / delivery time / consent phrases MUST NEVER be saved as addresses
+  // e.g. "qua lấy, giao", "hôm sau cũng đc", "lúc nào cũng được", "ok em", "chưa biết"
+  if (!hasAddrKeyword) {
+    if (
+      /^(?:qua\s+)?(?:giao|nhận|lấy)(?:\s*,?\s*(?:giao|nhận|lấy|hàng))*$/i.test(lower) ||
+      /(?:cũng\s+(?:được|đc)|tùy\s+bên\s+em|lúc\s+nào\s+cũng|bao\s+giờ\s+cũng|khi\s+nào\s+cũng)/i.test(lower) ||
+      /^(?:giao\s+nhận|giao\s+hàng|nhận\s+hàng|hỏa\s+tốc|trong\s+ngày|luôn|ngay|giao\s+nhận\s+hỏa\s+tốc|hôm\s+sau|sang\s+hôm\s+sau|ngày\s+mai|ngày\s+kia|sáng\s+mai|chiều\s+mai|chưa\s+biết|chưa\s+rõ|không\s+nhớ)$/i.test(lower) ||
+      /^(?:nhận\s+hỏa\s+tốc|giao\s+hỏa\s+tốc|hỏa\s+tốc\s+trong\s+ngày|hỏa\s+tốc\s+trong\s+ngày\s+luôn)$/i.test(lower)
+    ) {
+      return true;
+    }
+    if (detectDeliveryTime(cleaned)) {
+      return true;
+    }
   }
 
   // Weights, dimensions, volumes, quantities or comparison phrases
@@ -404,7 +420,7 @@ function detectCargoCategory(text: string | undefined | null): string | null {
   }
 
   // 7. Đồ gia dụng
-  if (/(?:đồ gia dụng|gia dụng|nồi cơm điện|chảo|bát đĩa|máy xay|máy ép|quạt điện|bàn là|ấm siêu tốc|máy sấy|lò vi sóng|nồi chiên)(?=$|[\s,.:;!?()[\]"'/])/i.test(lower)) {
+  if (/(?:^|[\s,.:;!?()[\]"'/])(?:đồ gia dụng|gia dụng|nồi cơm điện|chảo|bát đĩa|máy xay|máy ép|quạt điện|quạt|bàn là|ấm siêu tốc|máy sấy|lò vi sóng|nồi chiên|đèn\s*chùm|đèn\s*ngủ|đèn\s*led|đèn|bàn\s*ghế|tivi|tủ\s*lạnh|máy\s*giặt|điều\s*hòa|bếp\s*từ|bếp\s*ga|cái\s+loa|bộ\s+loa|loa\s+đài|loa\s+bluetooth|gương\s+soi|bức\s+tranh|tranh\s+ảnh|tranh\s+treo|tranh\s+sơn|tranh\s+thêu|tranh\s+đá)(?=$|[\s,.:;!?()[\]"'/])/i.test(lower)) {
     return 'Đồ gia dụng';
   }
 
@@ -1724,11 +1740,17 @@ function smartExtractVietnamese(text: string, current: any) {
   }
 
   // 6. Detect Addresses (Sender & Receiver)
-  // Step 6A: Check Pattern A: "từ [SENDER] (đi|đến|tới|sang|vào|về|giao đến|giao tới) [RECEIVER]"
-  const tuMatch = text.match(/(?:^|\s+)từ\s+(.+?)\s+(?:đi|đến|tới|sang|vào|về|giao(?:\s+(?:đến|tới|vào|sang|về|ở|tại|cho))?)\s+([^;\n]+)/i);
+  // Guard: Nếu khách chỉ đang trả lời về thời gian giao nhận (VD: "Qua lấy, giao trong ngày hoặc sang hôm sau cũng đc") -> KHÔNG tách địa chỉ!
+  const hasAnyAddressKeyword = ADDR_KEYWORD_REGEX.test(text);
+  const isPureDeliveryTimeReply =
+    (Boolean(detectDeliveryTime(text)) && !hasAnyAddressKeyword) ||
+    (!hasAnyAddressKeyword && /(?:cũng\s+(?:được|đc)|tùy\s+bên\s+em|lúc\s+nào\s+cũng|hôm\s+sau|sang\s+hôm\s+sau)/i.test(text));
 
-  // Step 6B: Check Pattern B: "lấy [ở|tại] [SENDER] (giao|chuyển|gửi|đến|tới|sang|vào|về|đi) [RECEIVER]"
-  const layMatch = text.match(/(?:lấy(?:\s+hàng)?(?:\s+(?:ở|tại))?)\s+(.+?)\s+(?:giao|chuyển(?:\s+đến)?|gửi(?:\s+đến)?|đến|tới|sang|vào|về|đi)(?:\s+(?:đến|tới|ở|tại|vào|sang|về|cho))?\s+([^;\n]+)/i);
+  // Step 6A: Check Pattern A: "từ [SENDER] (đi|đến|tới|sang|vào|về|xuống|lên|ra|giao đến|giao tới) [RECEIVER]"
+  const tuMatch = text.match(/(?:^|\s+)từ\s+(.+?)\s+(?:đi|đến|tới|sang|vào|về|xuống|lên|ra|giao(?:\s+(?:đến|tới|vào|sang|về|xuống|lên|ra|ở|tại|cho))?)\s+([^;\n]+)/i);
+
+  // Step 6B: Check Pattern B: "lấy [ở|tại] [SENDER] (giao|chuyển|gửi|đến|tới|sang|vào|về|xuống|lên|ra|đi) [RECEIVER]"
+  const layMatch = text.match(/(?:lấy(?:\s+hàng)?(?:\s+(?:ở|tại))?)\s+(.+?)\s+(?:giao|chuyển(?:\s+đến)?|gửi(?:\s+đến)?|đến|tới|sang|vào|về|xuống|lên|ra|đi)(?:\s+(?:đến|tới|ở|tại|vào|sang|về|xuống|lên|ra|cho))?\s+([^;\n]+)/i);
 
   // Step 6C: Check landmarks from dictionary, keeping longest non-overlapping matches
   const foundLandmarks: Array<{ fullAddress: string; ward: string; matchIndex: number; matchLength: number }> = [];
@@ -1763,41 +1785,43 @@ function smartExtractVietnamese(text: string, current: any) {
 
   // Step 6D: Check General Split Separator (Avoid matching bare 'chuyển', 'gửi' or 'giao' without destination prepositions!)
   // IMPORTANT: Do NOT match 'đến' / 'tới' if preceded by 'chưa' / 'dưới' / 'tầm' / 'khoảng' or followed by weight/dimension units!
-  const splitRegex = /(?:,\s*|\s+)(?:giao\s+(?:đến|tới|sang|vào|về|qua|tại|ở|cho)|chuyển\s+(?:đến|tới|sang|vào|về|qua)|gửi\s+(?:đến|tới|sang|vào|về|qua)|(?<!(?:chưa|dưới|khoảng|tầm)\s+)(?:đến|tới|sang|vào|về|đi))\s+(?!\d+\s*(?:kg|kilo|kilogram|cân|lạng|g|gram|tạ|yến|tấn|cm|m|mm|trang|cuốn|chiếc|cái|kiện)\b)/i;
+  const splitRegex = /(?:,\s*|\s+)(?:giao\s+(?:đến|tới|sang|vào|về|xuống|lên|ra|qua|tại|ở|cho)|chuyển\s+(?:đến|tới|sang|vào|về|xuống|lên|ra|qua)|gửi\s+(?:đến|tới|sang|vào|về|xuống|lên|ra|qua)|(?<!(?:chưa|dưới|khoảng|tầm)\s+)(?:đến|tới|sang|vào|về|xuống|lên|ra|đi))\s+(?!\d+\s*(?:kg|kilo|kilogram|cân|lạng|g|gram|tạ|yến|tấn|cm|m|mm|trang|cuốn|chiếc|cái|kiện|tầng|lầu)\b)/i;
   const splitMatch = text.match(splitRegex);
 
   let senderCandidate = '';
   let receiverCandidate = '';
 
   const hasSenderKeyword = /(?:^|\s+)(?:lấy|gửi\s+từ|từ)\b/i.test(text);
-  const hasReceiverKeyword = /(?:^|\s+)(?:giao|gửi\s+(?:đến|cho|tới)|nhận|đến|tới|sang|vào|về)\b/i.test(text);
+  const hasReceiverKeyword = /(?:^|\s+)(?:giao|gửi\s+(?:đến|cho|tới)|nhận|đến|tới|sang|vào|về|xuống|lên|ra)\b/i.test(text);
 
-  if (tuMatch && tuMatch[1] && tuMatch[2]) {
-    senderCandidate = cleanAddressText(tuMatch[1]);
-    receiverCandidate = cleanAddressText(tuMatch[2]);
-  } else if (layMatch && layMatch[1] && layMatch[2]) {
-    senderCandidate = cleanAddressText(layMatch[1]);
-    receiverCandidate = cleanAddressText(layMatch[2]);
-  } else if (splitMatch && splitMatch.index !== undefined && splitMatch.index > 0) {
-    const sPart = cleanAddressText(text.slice(0, splitMatch.index));
-    const rPart = cleanAddressText(text.slice(splitMatch.index + splitMatch[0].length));
+  if (!isPureDeliveryTimeReply) {
+    if (tuMatch && tuMatch[1] && tuMatch[2]) {
+      senderCandidate = cleanAddressText(tuMatch[1]);
+      receiverCandidate = cleanAddressText(tuMatch[2]);
+    } else if (layMatch && layMatch[1] && layMatch[2]) {
+      senderCandidate = cleanAddressText(layMatch[1]);
+      receiverCandidate = cleanAddressText(layMatch[2]);
+    } else if (splitMatch && splitMatch.index !== undefined && splitMatch.index > 0) {
+      const sPart = cleanAddressText(text.slice(0, splitMatch.index));
+      const rPart = cleanAddressText(text.slice(splitMatch.index + splitMatch[0].length));
 
-    const isCargo = !/(?:từ|ở|tại|phố|đường|quận|huyện|tỉnh|thành\s*phố|ngõ|ngách|số\s*\d+|\d+\s+[a-zA-ZÀ-ỹ])/i.test(sPart) &&
-      (!!detectCargoCategory(sPart) || /\b\d+\s*(?:kg|kilo|g|gram)\b/i.test(sPart));
-    const isDeliveryTime = !!detectDeliveryTime(rPart) || !!detectDeliveryTime(sPart);
+      const isCargo = !/(?:từ|ở|tại|phố|đường|quận|huyện|tỉnh|thành\s*phố|ngõ|ngách|số\s*\d+|\d+\s+[a-zA-ZÀ-ỹ])/i.test(sPart) &&
+        (!!detectCargoCategory(sPart) || /\b\d+\s*(?:kg|kilo|g|gram)\b/i.test(sPart));
+      const isDeliveryTime = !!detectDeliveryTime(rPart) || !!detectDeliveryTime(sPart);
 
-    if (sPart.length >= 2 && !isCargo && !isDeliveryTime && !isNotValidAddress(sPart) && !isNotValidAddress(rPart)) {
-      senderCandidate = sPart;
-      receiverCandidate = rPart;
-    }
-  } else if (distinctLandmarks.length >= 2) {
-    // Only split into sender & receiver if they are distinct and separated by routing keywords or punctuation
-    const first = distinctLandmarks[0];
-    const second = distinctLandmarks[1];
-    const between = text.slice(first.matchIndex + first.matchLength, second.matchIndex);
-    if (/(?:đến|tới|sang|vào|về|đi|giao|chuyển|-|–|,)/i.test(between) || (!hasSenderKeyword && !hasReceiverKeyword)) {
-      senderCandidate = first.fullAddress;
-      receiverCandidate = second.fullAddress;
+      if (sPart.length >= 2 && !isCargo && !isDeliveryTime && !isNotValidAddress(sPart) && !isNotValidAddress(rPart)) {
+        senderCandidate = sPart;
+        receiverCandidate = rPart;
+      }
+    } else if (distinctLandmarks.length >= 2) {
+      // Only split into sender & receiver if they are distinct and separated by routing keywords or punctuation
+      const first = distinctLandmarks[0];
+      const second = distinctLandmarks[1];
+      const between = text.slice(first.matchIndex + first.matchLength, second.matchIndex);
+      if (/(?:đến|tới|sang|vào|về|xuống|lên|ra|đi|giao|chuyển|-|–|,)/i.test(between) || (!hasSenderKeyword && !hasReceiverKeyword)) {
+        senderCandidate = first.fullAddress;
+        receiverCandidate = second.fullAddress;
+      }
     }
   }
 
@@ -1819,7 +1843,7 @@ function smartExtractVietnamese(text: string, current: any) {
         }
       }
     }
-  } else {
+  } else if (!isPureDeliveryTimeReply) {
     // Single address mentioned in message
     let candidate = '';
     const addrMatch = text.match(/(?:ở|tại|lấy\s+(?:hàng\s+)?tại|lấy\s+(?:hàng\s+)?ở|địa chỉ|giao\s+(?:hàng\s+)?tại|giao\s+(?:hàng\s+)?đến|giao\s+(?:hàng\s+)?ở|giao\s+(?:hàng\s+)?tới|(?<!(?:chưa|dưới|khoảng|tầm)\s+)(?:đến|tới))\s+(?!\d+\s*(?:kg|kilo|kilogram|cân|g|gram|tấn)\b)([^,.\n]+)/i);
@@ -1896,6 +1920,18 @@ function smartExtractVietnamese(text: string, current: any) {
         } else {
           updated.cargo.name = rawName;
         }
+      }
+    } else if (current?.nextMissingKey === 'cargo_info' && !updated.cargo.name) {
+      // Nếu bot vừa hỏi "loại hàng gì" và khách trả lời ngắn gọn (VD: "đèn", "tranh", "xe đạp")
+      const candidateItem = text.replace(/^(?:là|gửi|chuyển|bên\s+mình\s+gửi|em\s+gửi|anh\s+gửi|chị\s+gửi)\s+/i, '').replace(/[.!?]+$/, '').trim();
+      const wordCount = candidateItem.split(/\s+/).filter(Boolean).length;
+      const isSkipPhrase = /^(?:ok|oke|không|chưa|chưa\s*biết|chào|alo|xin\s*chào|có|được|gì\s*cũng\s*được|\d+)$/i.test(candidateItem) ||
+        isValidVNPhone(candidateItem) ||
+        Boolean(detectDeliveryTime(candidateItem)) ||
+        /\b\d+\s*(?:kg|kilo|cân|g|gram)\b/i.test(candidateItem) ||
+        hasAnyAddressKeyword;
+      if (candidateItem.length >= 2 && candidateItem.length <= 45 && wordCount <= 6 && !isGenericCargoWord(candidateItem) && !isSkipPhrase) {
+        updated.cargo.name = candidateItem.charAt(0).toUpperCase() + candidateItem.slice(1);
       }
     }
   }
@@ -2211,14 +2247,94 @@ function isCustomerConfirmation(text: string | undefined | null): boolean {
   return false;
 }
 
-// Tự nhiên hóa câu phản hồi của điều phối viên CSKH Đi Chung (chuẩn phong cách người Việt, không robot)
-function generateNaturalVietnameseReply(info: any, nextKey?: string): string {
+// Chuẩn hóa chuỗi để so sánh tránh lặp nguyên văn câu hỏi
+function normalizeForDedup(text: string): string {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Đếm số lần bot đã hỏi từng mục trong lịch sử hội thoại gần đây
+function countKeyAsksInHistory(history: any[] = []): Record<string, number> {
+  const counts: Record<string, number> = {
+    sender_address: 0,
+    receiver_address: 0,
+    cargo_info: 0,
+    delivery_time: 0,
+  };
+  const botMsgs = (history || [])
+    .filter((h: any) => h.role === 'model' || h.role === 'assistant' || h.sender === 'bot')
+    .map((h: any) => String(h.content || h.text || '').toLowerCase());
+
+  for (const msg of botMsgs) {
+    if (/(?:địa chỉ lấy hàng|lấy hàng ở|chỗ lấy hàng|điểm lấy)/i.test(msg)) counts.sender_address += 1;
+    else if (/(?:địa chỉ giao hàng|giao đến|giao hàng đến|điểm giao|gửi đến đâu)/i.test(msg)) counts.receiver_address += 1;
+    else if (/(?:loại hàng gì|mặt hàng gì|tên mặt hàng|khối lượng|kích thước|nặng bao nhiêu|nặng tầm)/i.test(msg)) counts.cargo_info += 1;
+    else if (/(?:thời gian giao nhận|khoảng thời gian nào|khi nào.*lấy|bao giờ.*giao)/i.test(msg)) counts.delivery_time += 1;
+  }
+  return counts;
+}
+
+// Chọn câu hỏi tiếp theo linh hoạt: nếu khách chưa cho địa chỉ thì ưu tiên hỏi thông tin hàng hóa trước thay vì ép hỏi địa chỉ
+function chooseNextQuestionKey(evalResult: any, history: any[] = [], userText = ''): string | undefined {
+  if (evalResult.isComplete) return undefined;
+  const missing: string[] = evalResult.missingKeys || [];
+  const defaultKey = evalResult.nextMissingKey;
+  if (!defaultKey) return undefined;
+
+  const counts = countKeyAsksInHistory(history);
+  const noAddressYetInMsg = /(?:chưa\s*(?:có|biết|rõ)|để\s*hỏi\s*lại|từ\s*từ|chưa\s*chắc)/i.test(userText);
+
+  if ((defaultKey === 'sender_address' || defaultKey === 'receiver_address') && (counts[defaultKey] >= 1 || noAddressYetInMsg)) {
+    if (missing.includes('cargo_info') && counts.cargo_info < 2) {
+      return 'cargo_info';
+    }
+    if (missing.includes('delivery_time') && counts.delivery_time < 2) {
+      return 'delivery_time';
+    }
+    const otherAddr = defaultKey === 'sender_address' ? 'receiver_address' : 'sender_address';
+    if (missing.includes(otherAddr) && counts[otherAddr] === 0) {
+      return otherAddr;
+    }
+  }
+
+  return defaultKey;
+}
+
+// Tự nhiên hóa câu phản hồi của điều phối viên CSKH Đi Chung (chuẩn phong cách người Việt, không robot, hạn chế "Dạ", không lặp nguyên văn)
+function generateNaturalVietnameseReply(info: any, nextKey?: string, repeatCount = 0): string {
   const evalResult = evaluateCompleteness(info);
   if (evalResult.isComplete) {
     return formatOrderConfirmationForm(info);
   }
 
   const key = nextKey || evalResult.nextMissingKey;
+
+  // Quy tắc: Đến lần thứ 2 hỏi cùng nội dung -> dùng thông điệp tự nhiên "Hiện em vẫn chưa có thông tin ..., vui lòng cung cấp để em tiếp tục tư vấn"
+  if (repeatCount >= 1) {
+    switch (key) {
+      case 'sender_address':
+        return 'Hiện em vẫn chưa có thông tin địa chỉ lấy hàng (kèm phường/xã), anh/chị vui lòng cung cấp để em tiếp tục tư vấn nhé.';
+      case 'receiver_address':
+        return 'Hiện em vẫn chưa có thông tin địa chỉ giao hàng (kèm phường/xã), anh/chị vui lòng cung cấp để em tiếp tục tư vấn nhé.';
+      case 'cargo_info': {
+        const cargo = info.cargo;
+        const hasName = !!cargo?.name?.trim() && !isGenericCargoWord(cargo.name);
+        const hasWeight = !!cargo?.weight?.trim() || !!cargo?.weightKg;
+        if (hasWeight && !hasName) {
+          return 'Hiện em vẫn chưa có thông tin tên mặt hàng mình cần gửi (ví dụ: đồ gia dụng, tài liệu, quần áo...), vui lòng cung cấp để em tiếp tục tư vấn ạ.';
+        }
+        if (hasName && !hasWeight) {
+          return 'Hiện em vẫn chưa có thông tin khối lượng (kg) hoặc kích thước kiện hàng, vui lòng cung cấp để em tiếp tục tư vấn ạ.';
+        }
+        return 'Hiện em vẫn chưa có đủ thông tin hàng hóa (tên hàng kèm cân nặng hoặc kích thước), anh/chị vui lòng cung cấp để em tiếp tục tư vấn ạ.';
+      }
+      case 'delivery_time':
+        return 'Hiện em vẫn chưa có thông tin thời gian giao nhận hàng, anh/chị vui lòng cung cấp để em tiếp tục tư vấn ạ.';
+    }
+  }
 
   const cargoName = info.cargo?.name && !isGenericCargoWord(info.cargo.name) ? info.cargo.name : '';
   const weightStr = info.cargo?.weight || (info.cargo?.weightKg ? `${info.cargo.weightKg}kg` : '');
@@ -2227,22 +2343,22 @@ function generateNaturalVietnameseReply(info: any, nextKey?: string): string {
   switch (key) {
     case 'sender_address':
       if (cargoSnippet) {
-        return `Em đã ghi nhận ${cargoSnippet} rồi ạ. Anh/chị cho em xin địa chỉ lấy hàng chi tiết (kèm phường/xã) với nhé ạ.`;
+        return `Dạ em đã ghi nhận ${cargoSnippet} rồi ạ. Anh/chị cho em xin địa chỉ lấy hàng (kèm phường/xã) để em kiểm tra tuyến nhé?`;
       }
-      return 'Dạ bên em chuyên về dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Anh/chị cho em xin địa chỉ lấy hàng chi tiết (kèm phường/xã) với nhé ạ.';
+      return 'Bên em chuyên về dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Anh/chị cho em xin địa chỉ lấy hàng (kèm phường/xã) nhé?';
 
     case 'receiver_address': {
       const sAddr = info.sender?.address?.trim();
       if (sAddr && cargoSnippet) {
-        return `Em đã lưu điểm lấy hàng tại ${sAddr} và ${cargoSnippet} rồi ạ. Anh/chị cho em xin thêm địa chỉ giao hàng chi tiết (kèm phường/xã) mình muốn gửi đến đâu với ạ?`;
+        return `Dạ em đã lưu điểm lấy hàng tại ${sAddr} và ${cargoSnippet} rồi ạ. Hàng này mình giao đến địa chỉ nào (kèm phường/xã) ạ?`;
       }
       if (sAddr) {
-        return `Em đã lưu điểm lấy hàng tại ${sAddr} rồi ạ. Anh/chị cho em xin thêm địa chỉ giao hàng chi tiết (kèm phường/xã) mình muốn gửi đến đâu với ạ?`;
+        return `Dạ em đã lưu điểm lấy hàng tại ${sAddr} rồi ạ. Mình cần giao hàng đến địa chỉ nào (kèm phường/xã) ạ?`;
       }
       if (cargoSnippet) {
-        return `Em đã ghi nhận ${cargoSnippet} rồi ạ. Anh/chị cho em xin thêm địa chỉ giao hàng chi tiết (kèm phường/xã) mình muốn gửi đến đâu với ạ?`;
+        return `Dạ em đã ghi nhận ${cargoSnippet} rồi ạ. Anh/chị cần giao hàng đến địa chỉ nào (kèm phường/xã) ạ?`;
       }
-      return 'Dạ anh/chị cho em xin địa chỉ giao hàng chi tiết (kèm phường/xã) mình muốn gửi đến đâu với nhé ạ.';
+      return 'Anh/chị cho em xin địa chỉ giao hàng cụ thể (kèm phường/xã) nhé?';
     }
 
     case 'cargo_info': {
@@ -2252,22 +2368,22 @@ function generateNaturalVietnameseReply(info: any, nextKey?: string): string {
       const hasDims = !!cargo?.dimensions?.raw?.trim() || (!!cargo?.dimensions?.length && !!cargo?.dimensions?.width && !!cargo?.dimensions?.height);
 
       if (hasName && !hasWeight && !hasDims) {
-        return `Dạ em đã lưu loại hàng là ${cargo.name} rồi ạ. Kiện này nặng khoảng bao nhiêu kg hoặc kích thước thế nào anh/chị nhỉ?`;
+        return `Dạ em đã lưu loại hàng là ${cargo.name} rồi ạ. Kiện này nặng khoảng bao nhiêu kg hoặc kích thước thế nào ạ?`;
       }
       if (hasWeight && !hasName && !hasDims) {
         const wStr = cargo.weight || `${cargo.weightKg} kg`;
-        return `Dạ em đã lưu khối lượng ${wStr}. Kiện của mình là loại hàng gì (tài liệu, hoa quả, quần áo, thực phẩm...) anh/chị nhỉ?`;
+        return `Dạ em đã lưu khối lượng ${wStr}. Kiện của mình là mặt hàng gì (ví dụ: tài liệu, hoa quả, quần áo, đồ gia dụng...) ạ?`;
       }
       if (hasDims && !hasName && !hasWeight) {
-        return `Dạ em đã lưu kích thước kiện hàng. Anh/chị cho em xin thêm loại hàng hoặc khối lượng (kg) với nhé ạ.`;
+        return 'Dạ em đã lưu kích thước kiện hàng. Anh/chị cho em biết thêm tên mặt hàng hoặc khối lượng (kg) nhé?';
       }
 
-      return 'Dạ bên em đã nhận thông tin tuyến giao nhận rồi ạ. Anh/chị gửi kiện hàng gì (tài liệu, hoa quả, quần áo...), nặng tầm bao nhiêu kg để bên em sắp xếp xe phù hợp ạ?';
+      return 'Anh/chị gửi mặt hàng gì, nặng tầm bao nhiêu kg để bên em sắp xếp xe phù hợp ạ?';
     }
 
     case 'delivery_time': {
-      const cargoName = info.cargo?.name && !isGenericCargoWord(info.cargo.name) ? `kiện [${info.cargo.name}]` : 'kiện hàng';
-      return `Dạ em đã lưu thông tin ${cargoName} rồi ạ. Anh/chị cần bên em qua lấy và giao trong khoảng thời gian nào (như hỏa tốc trong ngày hay sáng mai) ạ?`;
+      const cName = info.cargo?.name && !isGenericCargoWord(info.cargo.name) ? `kiện [${info.cargo.name}]` : 'kiện hàng';
+      return `Dạ em đã lưu thông tin ${cName} rồi ạ. Anh/chị cần bên em qua lấy và giao trong khoảng thời gian nào (như trong ngày hay sáng mai) ạ?`;
     }
 
     default:
@@ -2436,15 +2552,6 @@ async function processChatPipeline(
     };
   }
 
-  // Graceful fallback: Khách nhắn "Ok", "Đúng rồi", "Chuẩn rồi" nhưng phiên chat bị gián đoạn/reset
-  if (isConfirm && !isCorrection && (!currentInfo?.pickup?.address || !currentInfo?.receiver?.address)) {
-    return {
-      reply: 'Dạ em ghi nhận xác nhận của anh/chị rồi ạ! Anh/chị đợi chút em kiểm tra và báo giá cho mình ngay nhé.',
-      shippingInfo: currentInfo || {},
-      quickReplies: [],
-    };
-  }
-
   // Pre-extract with fast NLP parser first
   const fastExtracted = smartExtractVietnamese(message, currentInfo);
   console.log('[DEBUG] fastExtracted:', JSON.stringify(fastExtracted));
@@ -2469,8 +2576,13 @@ async function processChatPipeline(
 
   if (!ai) {
     const evalResult = evaluateCompleteness(fastExtracted);
+    const chosenKey = chooseNextQuestionKey(evalResult, history, message);
+    if (chosenKey) {
+      evalResult.nextMissingKey = chosenKey;
+    }
+    const askCounts = countKeyAsksInHistory(history);
+    const repeatCount = chosenKey ? askCounts[chosenKey] || 0 : 0;
     let reply = '';
-    const nextQ = getNextQuestionAndReplies(evalResult.nextMissingKey, fastExtracted.cargo);
 
     // Clean internal flags before response
     const { _invalidSenderPhone, _invalidReceiverPhone, ...cleanShippingInfo } = fastExtracted;
@@ -2484,7 +2596,10 @@ async function processChatPipeline(
     } else if (evalResult.isComplete) {
       reply = formatOrderConfirmationForm(cleanShippingInfo);
     } else {
-      reply = generateNaturalVietnameseReply(cleanShippingInfo, evalResult.nextMissingKey);
+      reply = generateNaturalVietnameseReply(cleanShippingInfo, chosenKey, repeatCount);
+      if (lastBotMsg && normalizeForDedup(reply) === normalizeForDedup(lastBotMsg)) {
+        reply = generateNaturalVietnameseReply(cleanShippingInfo, chosenKey, Math.max(1, repeatCount + 1));
+      }
     }
 
     return {
@@ -2515,34 +2630,28 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
 1. Phân tích tin nhắn của khách và trích xuất/cập nhật thông tin:
    - sender: address (có phường/xã), hasWardCommune, name nếu có, phone nếu khách chủ động cung cấp.
    - receiver: address (có phường/xã), hasWardCommune, name nếu có, phone nếu khách chủ động cung cấp.
-   - cargo: name (TÊN LOẠI HÀNG: Tài liệu, Hoa quả, Quần áo...), weight, weightKg, dimensions (length, width, height, raw), category, specialNotes.
-   - deliveryTime: thời gian giao nhận dạng text (ví dụ: "Sáng mai", "Chiều nay 15h", "Trong giờ hành chính", "Giao ngay", "Ngày mai lúc 10h", ...).
+   - cargo: name (TÊN LOẠI HÀNG: Tài liệu, Hoa quả, Quần áo, Đồ gia dụng...), weight, weightKg, dimensions (length, width, height, raw), category, specialNotes.
+   - deliveryTime: thời gian giao nhận dạng text (ví dụ: "Sáng mai", "Chiều nay 15h", "Trong ngày hoặc sang hôm sau", "Trong giờ hành chính", "Giao ngay"...).
 2. QUY ĐỊNH BẮT BUỘC: DỊCH NGƯỢC ĐỊA CHỈ TỪ CÂU TRẢ LỜI CỦA KHÁCH:
    - Dịch ngược (Reverse Geocode) các điểm mốc, tòa nhà, bến xe, bệnh viện, trường học, tuyến đường nổi tiếng (ví dụ: Keangnam, Landmark 81, Cầu Giấy, Chợ Bến Thành, 45 Lê Duẩn...) thành địa chỉ chi tiết đầy đủ Phường/Xã.
-   - TUYỆT ĐỐI KHÔNG ĐƯỢC ĐỂ TỪ "tôi muốn", "mình cần", "em muốn", "gửi hàng từ" VÀO ĐỊA CHỈ! Địa chỉ lấy hàng phải là địa danh/địa chỉ thực tế (ví dụ: "Đường Cầu Giấy, Phường Quan Hoa, Quận Cầu Giấy, Hà Nội" hoặc "Cầu Giấy, Hà Nội").
+   - Hiểu văn phong vùng miền: "Từ [A] xuống/lên/ra/về/sang/vào [B]" => [A] là điểm lấy hàng (sender.address), [B] là điểm giao hàng (receiver.address).
+   - TUYỆT ĐỐI KHÔNG ĐƯỢC ĐỂ TỪ "tôi muốn", "mình cần", "em muốn", "gửi hàng từ" hay các cụm từ thời gian ("qua lấy, giao trong ngày", "hôm sau cũng đc") VÀO ĐỊA CHỈ!
    - Đặt hasWardCommune: true và TUYỆT ĐỐI KHÔNG HỎI LẠI ĐỊA CHỈ ĐÃ DỊCH ĐƯỢC!
    - CHỈ HỎI LẠI ĐỊA CHỈ KHI TUYỆT ĐỐI KHÔNG THỂ DỊCH NGƯỢC ĐƯỢC (ví dụ khách chỉ nói chung chung: "Hà Nội", "Đà Nẵng", "ở Cầu Giấy", "ở Quận 1").
 3. QUY ĐỊNH VỀ THÔNG TIN HÀNG HÓA (TÊN HÀNG BẮT BUỘC LÀ TÊN LOẠI HÀNG):
    - Tên hàng BẮT BUỘC là TÊN LOẠI HÀNG: "Hoa quả", "Tài liệu", "Quần áo", "Thực phẩm", "Hải sản", "Đồ gia dụng", "Linh kiện điện tử", "Mỹ phẩm", "Dược phẩm"...
-   - Khách nhắc đến bất kỳ loại trái cây nào ("hoa quả", "trái cây", "cam", "táo", "sầu riêng", "cherry", "xoài", "dưa hấu", "bưởi"...) BẮT BUỘC lấy tên loại hàng là: "Hoa quả".
-   - TUYỆT ĐỐI KHÔNG GÁN TÊN HÀNG LÀ 'hàng', 'đơn hàng', 'kiện hàng', 'hàng hóa', 'đồ'. Đây là danh từ chung. Nếu khách chỉ nói chung chung 'tôi muốn gửi hàng' mà chưa nêu rõ loại hàng gì, BẮT BUỘC để cargo.name: '' (rỗng)!
-   - Thông tin hàng gồm 3 trường: Tên hàng, Khối lượng (kg), Kích thước (DxRxC cm).
-   - PHẢI NHẬN ĐƯỢC ÍT NHẤT 2 TRÊN 3 TRƯỜNG MỚI PASS! (ví dụ: "10kg hoa quả" đã có Tên hàng "Hoa quả" và Khối lượng "10kg" -> ĐÃ ĐẠT ĐỦ 2/3 TRƯỜNG, TUYỆT ĐỐI KHÔNG HỎI LẠI THÔNG TIN HÀNG NỮA).
-   - Khi khách hàng vừa cung cấp thông tin hàng hóa (ví dụ: "10kg hoa quả em ơi"), CSKH BẮT BUỘC ghi nhận rõ: "Dạ em đã ghi nhận kiện Hoa quả (10kg) rồi ạ." trước khi hỏi thông tin còn thiếu tiếp theo.
-4. THỜI GIAN GIAO NHẬN (TEXT) - QUY ĐỊNH BẮT BUỘC VỀ TỪ "GẤP":
-   - TỪ "GẤP" (như "anh gửi hàng gấp", "cần gấp", "chuyển gấp", "hàng gấp", "rất gấp") CHỈ LÀ TÂM LÝ KHÁCH HÀNG, TUYỆT ĐỐI KHÔNG CÓ NGHĨA LÀ "TRONG NGÀY" VÀ KHÔNG PHẢI LÀ THỜI GIAN GIAO NHẬN CỤ THỂ!
-   - TUYỆT ĐỐI KHÔNG gán "gấp" vào deliveryTime (phải để deliveryTime: "").
-   - VẪN BẮT BUỘC HỎI LẠI THỜI GIAN GIAO NHẬN (Hỏi: "Em xin thời gian giao nhận hàng.") trừ khi khách nói rõ mốc thời gian cụ thể (như "hỏa tốc trong ngày", "trong ngày", "sáng mai", "chiều nay 15h", "trong giờ hành chính").
-   - TUYỆT ĐỐI KHÔNG GÁN ĐỊA CHỈ HOẶC ĐỊA DANH VÀO deliveryTime! Nếu khách chưa nói mốc thời gian thì để "".
-5. QUY ĐỊNH PHẢN HỒI (HỎI THEO THỨ TỰ 4 BƯỚC & KHÔNG CÓ TỪ ĐỆM):
-   - BỎ THÔNG TIN SĐT người gửi và SĐT người nhận, KHÔNG ĐƯỢC HỎI SĐT.
-   - Thứ tự ưu tiên hỏi:
-     1. Nếu thiếu hoặc chưa dịch được phường/xã Địa chỉ lấy hàng => Hỏi: "Em xin địa chỉ lấy hàng chi tiết đến phường/xã."
-     2. Nếu thiếu hoặc chưa dịch được phường/xã Địa chỉ giao hàng => Hỏi: "Em xin địa chỉ giao hàng chi tiết đến phường/xã."
-     3. Nếu thông tin hàng chưa đạt (dưới 2 trường) => Hỏi lại để lấy đủ 2 trường.
-     4. Nếu thiếu Thời gian giao nhận => Hỏi: "Em xin thời gian giao nhận hàng."
-   - BỎ HOÀN TOÀN CÁC PHẦN ĐỆM: "để bên em hỗ trợ mình ạ", "để bên em hỗ trợ", "để em hỗ trợ", v.v.
-   - XÓA BỎ HOÀN TOÀN GỢI Ý (quickReplies = []).
+   - Các món đồ gia dụng / vật dụng ngắn (VD: "đèn", "bàn", "ghế", "loa", "tủ", "nồi", "bếp") => BẮT BUỘC ghi nhận thành "Đồ gia dụng" (hoặc đúng tên mặt hàng khách nhắn nếu đặc thù), TUYỆT ĐỐI KHÔNG bỏ sót để rồi hỏi lại!
+   - TUYỆT ĐỐI KHÔNG GÁN TÊN HÀNG LÀ 'hàng', 'đơn hàng', 'kiện hàng', 'hàng hóa', 'đồ'. Đây là danh từ chung.
+   - Thông tin hàng gồm 3 trường: Tên hàng, Khối lượng (kg), Kích thước (DxRxC cm). PHẢI NHẬN ĐƯỢC ÍT NHẤT 2 TRÊN 3 TRƯỜNG MỚI PASS!
+   - Khi khách vừa cung cấp thông tin hàng mới, ghi nhận ngắn gọn: "Dạ em đã ghi nhận kiện [Tên hàng] ([Khối lượng]) rồi ạ." trước khi hỏi tiếp.
+4. THỜI GIAN GIAO NHẬN (TEXT) - QUY ĐỊNH BẮT BUỘC:
+   - TỪ "GẤP" CHỈ LÀ TÂM LÝ KHÁCH HÀNG, TUYỆT ĐỐI KHÔNG PHẢI LÀ THỜI GIAN GIAO NHẬN CỤ THỂ -> để deliveryTime: "".
+   - Các câu như "Qua lấy, giao trong ngày hoặc sang hôm sau cũng đc", "sáng mai", "trong ngày" => gán vào deliveryTime ("Trong ngày hoặc sang hôm sau"), TUYỆT ĐỐI KHÔNG đưa vào sender.address hay receiver.address!
+5. QUY ĐỊNH PHẢN HỒI (GIỐNG NGƯỜI THẬT, BỚT "DẠ", KHÔNG LẶP NGUYÊN VĂN):
+   - HẠN CHẾ TỪ "DẠ": Không mở đầu câu hỏi bằng "Dạ". CHỈ dùng "Dạ" khi xác nhận/ghi nhận thông tin mới khách vừa cung cấp.
+   - KHÔNG LẶP LẠI TỪNG TỪ MỘT CÂU HỎI ĐÃ HỎI Ở LƯỢT TRƯỚC: Nếu hỏi lại cùng một mục lần 2, phải đổi sang câu tự nhiên: "Hiện em vẫn chưa có thông tin ..., anh/chị vui lòng cung cấp để em tiếp tục tư vấn nhé."
+   - LINH HOẠT: Nếu khách chưa cung cấp địa chỉ ngay sau khi hỏi, chuyển sang hỏi thông tin hàng hóa trước thay vì cứ ép hỏi địa chỉ làm khách khó chịu.
+   - BỎ HOÀN TOÀN CÁC PHẦN ĐỆM ("để bên em hỗ trợ mình ạ"...) và quickReplies luôn là [].
 6. SAU KHI THU THẬP ĐỦ 4 THÔNG TIN THÌ CONFIRM BẰNG FORM (BẮT BUỘC TÁCH CÁC TRƯỜNG THÔNG TIN 1 2 3 4 MỖI TRƯỜNG 1 DÒNG RIÊNG BIỆT BẰNG KÝ TỰ XUỐNG DÒNG \n):
    Dạ em đã nhận đủ thông tin đơn hàng, anh/chị xác nhận giúp em để em báo giá cho mình ạ:
    1) Địa chỉ lấy hàng: [Địa chỉ lấy hàng chi tiết]
@@ -2797,9 +2906,14 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
     };
 
     const evalResult = evaluateCompleteness(mergedInfo);
-    const nextQ = getNextQuestionAndReplies(evalResult.nextMissingKey);
+    const chosenKey = chooseNextQuestionKey(evalResult, history, message);
+    if (chosenKey) {
+      evalResult.nextMissingKey = chosenKey;
+    }
 
-    const naturalFallback = generateNaturalVietnameseReply(mergedInfo, evalResult.nextMissingKey);
+    const askCounts = countKeyAsksInHistory(history);
+    const repeatCount = chosenKey ? askCounts[chosenKey] || 0 : 0;
+    const naturalFallback = generateNaturalVietnameseReply(mergedInfo, chosenKey, repeatCount);
 
     let finalReply = parsed.reply?.trim() || '';
 
@@ -2817,27 +2931,28 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       const cargoCount = (mergedCargo.name?.trim() ? 1 : 0) + (mergedCargo.weight?.trim() || mergedCargo.weightKg ? 1 : 0) + (mergedCargo.dimensions?.raw?.trim() || mergedCargo.dimensions?.length ? 1 : 0);
       const askedCargoFluff = cargoCount >= 2 && (finalReply.toLowerCase().includes('khối lượng') || finalReply.toLowerCase().includes('kích thước') || finalReply.toLowerCase().includes('cân nặng') || finalReply.toLowerCase().includes('loại hàng'));
 
-      // If AI didn't provide a reply, or asked cargo when cargo passed, or asked out of sequence, use natural Vietnamese coordinator response
-      if (!finalReply || askedCargoFluff) {
+      // Nếu hỏi lại lần 2 cùng một mục, ưu tiên dùng mẫu "Hiện em vẫn chưa có thông tin..."
+      if (!finalReply || askedCargoFluff || repeatCount >= 1) {
         finalReply = naturalFallback;
       } else {
-        // Enforce sequence conformity
-        if (evalResult.nextMissingKey === 'sender_address' && !/(?:lấy|gửi\s*từ|điểm\s*lấy|địa\s*chỉ\s*lấy)/i.test(finalReply)) {
+        // Enforce sequence / target key conformity
+        if (chosenKey === 'sender_address' && !/(?:lấy|gửi\s*từ|điểm\s*lấy|địa\s*chỉ\s*lấy)/i.test(finalReply)) {
           finalReply = naturalFallback;
-        } else if (evalResult.nextMissingKey === 'receiver_address' && !/(?:giao|gửi\s*(?:đến|tới|cho|về)|điểm\s*giao|địa\s*chỉ\s*giao|nhận)/i.test(finalReply)) {
+        } else if (chosenKey === 'receiver_address' && !/(?:giao|gửi\s*(?:đến|tới|cho|về)|điểm\s*giao|địa\s*chỉ\s*giao|nhận)/i.test(finalReply)) {
           finalReply = naturalFallback;
-        } else if (evalResult.nextMissingKey === 'cargo_info' && !/(?:hàng|loại\s*hàng|khối\s*lượng|kích\s*thước|cân\s*nặng|kiện)/i.test(finalReply)) {
+        } else if (chosenKey === 'cargo_info' && !/(?:hàng|loại\s*hàng|mặt\s*hàng|khối\s*lượng|kích\s*thước|cân\s*nặng|kiện)/i.test(finalReply)) {
           finalReply = naturalFallback;
-        } else if (evalResult.nextMissingKey === 'delivery_time' && !/(?:thời\s*gian|hỏa\s*tốc|trong\s*ngày|khi\s*nào|lúc\s*nào|mấy\s*giờ|giao\s*nhận)/i.test(finalReply)) {
+        } else if (chosenKey === 'delivery_time' && !/(?:thời\s*gian|hỏa\s*tốc|trong\s*ngày|khi\s*nào|lúc\s*nào|mấy\s*giờ|giao\s*nhận)/i.test(finalReply)) {
           finalReply = naturalFallback;
         }
       }
     }
 
-    // If cargo is known (e.g. Hoa quả, 10kg) and finalReply doesn't acknowledge it, prepend acknowledgment
+    // Chỉ ghi nhận tên hàng vừa mới nhận được ở lượt này (không lặp lại ở mọi lượt sau)
     const cName = mergedCargo.name && !isGenericCargoWord(mergedCargo.name) ? mergedCargo.name : '';
     const cWeight = mergedCargo.weight || (mergedCargo.weightKg ? `${mergedCargo.weightKg}kg` : '');
-    if (cName && !evalResult.isComplete && !finalReply.toLowerCase().includes(cName.toLowerCase())) {
+    const cargoJustAdded = Boolean(cName && !currentInfo?.cargo?.name);
+    if (cargoJustAdded && !evalResult.isComplete && !finalReply.toLowerCase().includes(cName.toLowerCase()) && repeatCount === 0) {
       const ack = cWeight
         ? `Dạ em đã ghi nhận kiện [${cName}] (${cWeight}) rồi ạ. `
         : `Dạ em đã ghi nhận loại hàng là [${cName}] rồi ạ. `;
@@ -2845,6 +2960,11 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
     }
 
     finalReply = cleanResponseText(finalReply);
+
+    // Chống lặp lại nguyên văn câu bot vừa nhắn ngay trước đó
+    if (!evalResult.isComplete && lastBotMsg && normalizeForDedup(finalReply) === normalizeForDedup(lastBotMsg)) {
+      finalReply = cleanResponseText(generateNaturalVietnameseReply(mergedInfo, chosenKey, Math.max(1, repeatCount + 1)));
+    }
 
     return {
       reply: finalReply,
@@ -2863,6 +2983,12 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       cleanFast.deliveryTime = '';
     }
     const evalResult = evaluateCompleteness(cleanFast);
+    const chosenKey = chooseNextQuestionKey(evalResult, history, message);
+    if (chosenKey) {
+      evalResult.nextMissingKey = chosenKey;
+    }
+    const askCounts = countKeyAsksInHistory(history);
+    const repeatCount = chosenKey ? askCounts[chosenKey] || 0 : 0;
     let reply = '';
 
     if ((isFormPreviouslySent || currentInfo?.isComplete) && isConfirm && !isCorrection) {
@@ -2874,16 +3000,21 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
     } else if (evalResult.isComplete) {
       reply = formatOrderConfirmationForm(cleanFast);
     } else {
-      reply = cleanResponseText(generateNaturalVietnameseReply(cleanFast, evalResult.nextMissingKey));
+      reply = cleanResponseText(generateNaturalVietnameseReply(cleanFast, chosenKey, repeatCount));
     }
 
     const cFastName = cleanFast.cargo?.name && !isGenericCargoWord(cleanFast.cargo.name) ? cleanFast.cargo.name : '';
     const cFastWeight = cleanFast.cargo?.weight || (cleanFast.cargo?.weightKg ? `${cleanFast.cargo.weightKg}kg` : '');
-    if (cFastName && !evalResult.isComplete && !reply.toLowerCase().includes(cFastName.toLowerCase())) {
+    const fastCargoJustAdded = Boolean(cFastName && !currentInfo?.cargo?.name);
+    if (fastCargoJustAdded && !evalResult.isComplete && !reply.toLowerCase().includes(cFastName.toLowerCase()) && repeatCount === 0) {
       const ack = cFastWeight
         ? `Dạ em đã ghi nhận kiện [${cFastName}] (${cFastWeight}) rồi ạ. `
         : `Dạ em đã ghi nhận loại hàng là [${cFastName}] rồi ạ. `;
       reply = ack + reply;
+    }
+
+    if (!evalResult.isComplete && lastBotMsg && normalizeForDedup(reply) === normalizeForDedup(lastBotMsg)) {
+      reply = cleanResponseText(generateNaturalVietnameseReply(cleanFast, chosenKey, Math.max(1, repeatCount + 1)));
     }
 
     return {
@@ -3002,8 +3133,33 @@ interface ZaloUserSession {
   history: Array<{ role: 'user' | 'model'; content: string }>;
   currentInfo: any;
   lastActive: number;
+  humanTakeover?: boolean;
+  humanTakeoverBy?: string;
+  humanTakeoverAt?: number;
+  lastBotMessageAt?: number;
+  lastCustomerMessageAt?: number;
+  idleFollowUpSent?: boolean;
 }
 const zaloUserSessions = new Map<string, ZaloUserSession>();
+
+// Lưu dấu vết tin nhắn do Bot vừa gửi ra để phân biệt với tin nhắn do Nhân viên tự nhắn trên Zalo OA App
+const recentBotOutboundMessages = new Map<string, number>();
+function markBotSentMessage(userId: string, text: string) {
+  const key = `${userId}::${String(text || '').trim().slice(0, 80)}`;
+  recentBotOutboundMessages.set(key, Date.now() + 60 * 1000);
+}
+function wasRecentlySentByBot(userId: string, text: string): boolean {
+  const now = Date.now();
+  for (const [k, exp] of recentBotOutboundMessages.entries()) {
+    if (exp < now) recentBotOutboundMessages.delete(k);
+  }
+  const key = `${userId}::${String(text || '').trim().slice(0, 80)}`;
+  if (recentBotOutboundMessages.has(key)) {
+    recentBotOutboundMessages.delete(key);
+    return true;
+  }
+  return false;
+}
 
 // --- CRM DATA STRUCTURES (Customers & Full Chat History) ---
 export interface CrmCustomer {
@@ -3016,6 +3172,7 @@ export interface CrmCustomer {
   first_interaction: string;
   last_interaction: string;
   last_message: string;
+  human_takeover?: boolean;
   shipping_info: any;
 }
 
@@ -3406,6 +3563,7 @@ async function initDatabaseAndRestore() {
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS payment_ref VARCHAR(150);
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS negotiation_used BOOLEAN DEFAULT FALSE;
+      ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS human_takeover BOOLEAN DEFAULT FALSE;
       CREATE TABLE IF NOT EXISTS asterisk_call_logs (
         id VARCHAR(100) PRIMARY KEY,
         caller_phone VARCHAR(50) NOT NULL,
@@ -3465,6 +3623,7 @@ async function initDatabaseAndRestore() {
         first_interaction: r.first_interaction ? new Date(r.first_interaction).toISOString() : new Date().toISOString(),
         last_interaction: r.last_interaction ? new Date(r.last_interaction).toISOString() : new Date().toISOString(),
         last_message: r.last_message || '',
+        human_takeover: Boolean(r.human_takeover),
         shipping_info: r.shipping_info || {},
       });
     }
@@ -3769,6 +3928,7 @@ async function sendZaloOAReply(userId: string, replyText: string): Promise<boole
   }
 
   async function callZaloApi(authToken: string) {
+    markBotSentMessage(userId, replyText);
     return await fetch('https://openapi.zalo.me/v3.0/oa/message/cs', {
       method: 'POST',
       headers: {
@@ -4638,14 +4798,59 @@ app.get('/api/zalo/webhook', (_req: Request, res: Response) => {
   res.status(200).send('ZALO_WEBHOOK_OK');
 });
 
-// Zalo Webhook events (POST): Listen to incoming customer messages from Zalo OA
+// Zalo Webhook events (POST): Listen to incoming customer messages & human OA interventions from Zalo OA
 app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
-  const { event_name, user_id_by_app, sender, message } = req.body || {};
+  const { event_name, user_id_by_app, sender, recipient, message } = req.body || {};
   const userId = user_id_by_app || sender?.id;
   const userText = message?.text;
 
   // Acknowledge Zalo immediately to prevent retries (timeout is 3s on Zalo)
   res.status(200).json({ error: 0, message: 'Received' });
+
+  // 1. BẮT SỰ KIỆN NHÂN VIÊN CAN THIỆP TRỰC TIẾP TRÊN ZALO OA APP (oa_send_text, oa_send_image, oa_send_file...)
+  if (typeof event_name === 'string' && event_name.startsWith('oa_send_')) {
+    const recipientId = recipient?.id || user_id_by_app;
+    const oaMsgText = message?.text || `[Nhân viên gửi ${event_name.replace('oa_send_', '')}]`;
+    if (recipientId && !wasRecentlySentByBot(recipientId, oaMsgText)) {
+      let sess = zaloUserSessions.get(recipientId);
+      if (!sess) {
+        sess = { history: [], currentInfo: {}, lastActive: Date.now() };
+        zaloUserSessions.set(recipientId, sess);
+      }
+
+      // Hỗ trợ lệnh nhanh từ nhân viên trên OA App: "#bot" hoặc "#ai" để bật lại AI
+      if (/^#(?:bot|ai)\b/i.test(oaMsgText.trim())) {
+        sess.humanTakeover = false;
+        sess.humanTakeoverBy = undefined;
+        const cust = inMemoryCustomers.get(recipientId);
+        if (cust) cust.human_takeover = false;
+        if (dbPool) {
+          dbPool.query(`UPDATE crm_customers SET human_takeover = FALSE WHERE user_id = $1`, [recipientId]).catch(() => {});
+        }
+        saveSessionsCache();
+        logZaloEvent('token_update', `[AI Resumed] Nhân viên đã bật lại Bot AI cho khách ${recipientId}`);
+        return;
+      }
+
+      // Nhân viên đã nhắn tin trực tiếp -> DỪNG AI & HANDOVER hoàn toàn
+      sess.humanTakeover = true;
+      sess.humanTakeoverBy = 'Tư vấn viên (Zalo OA)';
+      sess.humanTakeoverAt = Date.now();
+      sess.idleFollowUpSent = true;
+      sess.lastActive = Date.now();
+
+      const cust = inMemoryCustomers.get(recipientId);
+      if (cust) cust.human_takeover = true;
+      if (dbPool) {
+        dbPool.query(`UPDATE crm_customers SET human_takeover = TRUE WHERE user_id = $1`, [recipientId]).catch(() => {});
+      }
+
+      await recordCrmInteraction(recipientId, 'agent', oaMsgText, sess.currentInfo, 'Tư vấn viên (Zalo OA)');
+      saveSessionsCache();
+      logZaloEvent('outgoing_reply', `[Human Handover - AI STOP] Nhân viên đã can thiệp trực tiếp cho khách ${recipientId}: "${oaMsgText.slice(0, 60)}"`);
+    }
+    return;
+  }
 
   if (event_name === 'user_send_text' && userId && userText) {
     logZaloEvent('incoming_webhook', `Khách hàng ${userId} nhắn: "${userText}"`, {
@@ -4754,23 +4959,40 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
       const isResetOrder = /^(?:tạo\s*đơn\s*mới|đơn\s*mới|hủy\s*đơn|làm\s*lại|reset)\b/i.test(trimmed);
 
       let session = zaloUserSessions.get(userId);
-      // Reset if inactive for > 6 hours or user explicitly requested new order
-      if (!session || isResetOrder || (Date.now() - session.lastActive > 6 * 60 * 60 * 1000)) {
+      const existingCust = inMemoryCustomers.get(userId);
+      const wasHumanTakeover = Boolean(session?.humanTakeover || existingCust?.human_takeover);
+
+      // Reset if inactive for > 6 hours or user explicitly requested new order (khi AI đang bật)
+      if (!session || (isResetOrder && !wasHumanTakeover) || (!wasHumanTakeover && Date.now() - session.lastActive > 6 * 60 * 60 * 1000)) {
         session = {
           history: [],
           currentInfo: {},
           lastActive: Date.now(),
+          humanTakeover: wasHumanTakeover,
         };
         zaloUserSessions.set(userId, session);
       }
 
+      session.lastActive = Date.now();
+      session.lastCustomerMessageAt = Date.now();
+      session.idleFollowUpSent = false;
+
       // Record incoming customer message in CRM
       await recordCrmInteraction(userId, 'user', userText, session.currentInfo);
 
+      // QUY TẮC 1: Khi nhân viên người thật đã can thiệp -> AI DỪNG HOÀN TOÀN (Handover)
+      if (session.humanTakeover || inMemoryCustomers.get(userId)?.human_takeover) {
+        session.humanTakeover = true;
+        saveSessionsCache();
+        console.log(`[Human Handover] AI đã dừng cho khách ${userId}, bỏ qua trả lời tự động.`);
+        return;
+      }
+
       if (isResetOrder) {
-        const resetReply = 'Dạ em đã tạo phiên đơn mới rồi ạ. Bên em chuyên dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Anh/chị cho em xin thông tin địa chỉ lấy và giao hàng nhé!';
+        const resetReply = 'Dạ em đã tạo phiên đơn mới rồi ạ. Bên em chuyên dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Anh/chị cho em xin địa chỉ lấy và giao hàng nhé!';
         session.history.push({ role: 'user', content: userText });
         session.history.push({ role: 'model', content: resetReply });
+        session.lastBotMessageAt = Date.now();
         saveSessionsCache();
         await sendZaloOAReply(userId, resetReply);
         await recordCrmInteraction(userId, 'bot', resetReply, session.currentInfo);
@@ -4783,6 +5005,7 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
         session.history.push({ role: 'user', content: userText });
         session.history.push({ role: 'model', content: closingReply });
         session.lastActive = Date.now();
+        session.lastBotMessageAt = Date.now();
         saveSessionsCache();
         await sendZaloOAReply(userId, closingReply);
         await recordCrmInteraction(userId, 'bot', closingReply, session.currentInfo);
@@ -4797,6 +5020,7 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
       session.history.push({ role: 'model', content: result.reply });
       session.currentInfo = result.shippingInfo;
       session.lastActive = Date.now();
+      session.lastBotMessageAt = Date.now();
 
       // Trim history if too long to keep context compact
       if (session.history.length > 16) {
@@ -4813,6 +5037,43 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
     }
   }
 });
+
+// QUY TẮC 3: Nếu sau ~5 phút không thấy khách phản ứng -> Tự động nhắn xin SĐT để tư vấn trực tiếp
+setInterval(async () => {
+  const now = Date.now();
+  const IDLE_MS = 5 * 60 * 1000;
+  const MAX_AGE_MS = 30 * 60 * 1000;
+
+  for (const [uid, sess] of zaloUserSessions.entries()) {
+    if (uid === dceOpsUserId || uid === defaultSupplierUserId) continue;
+    if (sess.humanTakeover || sess.idleFollowUpSent || sess.currentInfo?.isComplete) continue;
+    if (!sess.history || sess.history.length === 0) continue;
+
+    const lastMsg = sess.history[sess.history.length - 1];
+    if (lastMsg.role !== 'model') continue;
+
+    const refTime = sess.lastBotMessageAt || sess.lastActive;
+    const elapsed = now - refTime;
+    if (elapsed >= IDLE_MS && elapsed <= MAX_AGE_MS) {
+      sess.idleFollowUpSent = true;
+      const cust = inMemoryCustomers.get(uid);
+      const knownPhone = sess.currentInfo?.sender?.phone || cust?.phone || '';
+      const followUpText = isValidVNPhone(knownPhone)
+        ? `Anh/chị ơi, khi nào tiện anh/chị nhắn thêm thông tin giúp em nhé, hoặc bên em sẽ liên hệ qua số ${knownPhone} để tư vấn trực tiếp cho mình ạ!`
+        : 'Anh/chị ơi, nếu mình đang bận chưa tiện nhắn tin, anh/chị cho em xin số điện thoại để bên em liên hệ lại tư vấn và báo giá trực tiếp nhé!';
+
+      sess.history.push({ role: 'model', content: followUpText });
+      sess.lastBotMessageAt = now;
+      saveSessionsCache();
+
+      const sent = await sendZaloOAReply(uid, followUpText);
+      if (sent) {
+        await recordCrmInteraction(uid, 'bot', followUpText, sess.currentInfo, 'ShipBot (Nhắc sau 5 phút)');
+        logZaloEvent('outgoing_reply', `Đã gửi tin nhắn xin SĐT sau 5 phút không phản hồi tới ${uid}`);
+      }
+    }
+  }
+}, 30 * 1000);
 
 // --- CRM REST API ENDPOINTS ---
 
@@ -4872,7 +5133,7 @@ app.get('/api/crm/customers/:userId/messages', async (req: Request, res: Respons
   return res.json(list);
 });
 
-// POST /api/crm/customers/:userId/send - Nhân viên tư vấn nhắn tin trực tiếp tới khách qua Zalo OA
+// POST /api/crm/customers/:userId/send - Nhân viên tư vấn nhắn tin trực tiếp tới khách qua Zalo OA -> Dừng AI (Handover)
 app.post('/api/crm/customers/:userId/send', async (req: Request, res: Response) => {
   const { userId } = req.params;
   const { text, agentName } = req.body || {};
@@ -4881,10 +5142,27 @@ app.post('/api/crm/customers/:userId/send', async (req: Request, res: Response) 
     return res.status(400).json({ error: 'Nội dung tin nhắn không được để trống' });
   }
 
-  const session = zaloUserSessions.get(userId);
+  let session = zaloUserSessions.get(userId);
   const success = await sendZaloOAReply(userId, text.trim());
 
   if (success) {
+    if (!session) {
+      session = { history: [], currentInfo: {}, lastActive: Date.now() };
+      zaloUserSessions.set(userId, session);
+    }
+    session.humanTakeover = true;
+    session.humanTakeoverBy = agentName || 'Tư vấn viên (Web)';
+    session.humanTakeoverAt = Date.now();
+    session.idleFollowUpSent = true;
+    session.history.push({ role: 'model', content: text.trim() });
+    saveSessionsCache();
+
+    const cust = inMemoryCustomers.get(userId);
+    if (cust) cust.human_takeover = true;
+    if (dbPool) {
+      dbPool.query(`UPDATE crm_customers SET human_takeover = TRUE WHERE user_id = $1`, [userId]).catch(() => {});
+    }
+
     await recordCrmInteraction(
       userId,
       'agent',
@@ -4893,15 +5171,35 @@ app.post('/api/crm/customers/:userId/send', async (req: Request, res: Response) 
       agentName || 'Tư vấn viên (Web)'
     );
 
-    if (session) {
-      session.history.push({ role: 'model', content: text.trim() });
-      saveSessionsCache();
-    }
-
-    return res.json({ success: true, message: 'Đã gửi tin nhắn tới Zalo khách hàng thành công!' });
+    return res.json({ success: true, humanTakeover: true, message: 'Đã gửi tin nhắn và tạm dừng AI để tư vấn viên tiếp quản!' });
   } else {
     return res.status(500).json({ success: false, error: 'Không thể gửi tin nhắn qua Zalo OA. Kiểm tra Access Token!' });
   }
+});
+
+// POST /api/crm/customers/:userId/ai-toggle - Bật / Tắt AI cho từng khách hàng (Human Handover control)
+app.post('/api/crm/customers/:userId/ai-toggle', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const { humanTakeover } = req.body || {};
+  const paused = Boolean(humanTakeover);
+
+  let session = zaloUserSessions.get(userId);
+  if (!session) {
+    session = { history: [], currentInfo: {}, lastActive: Date.now() };
+    zaloUserSessions.set(userId, session);
+  }
+  session.humanTakeover = paused;
+  session.humanTakeoverAt = paused ? Date.now() : undefined;
+  saveSessionsCache();
+
+  const cust = inMemoryCustomers.get(userId);
+  if (cust) cust.human_takeover = paused;
+  if (dbPool) {
+    dbPool.query(`UPDATE crm_customers SET human_takeover = $1 WHERE user_id = $2`, [paused, userId]).catch(() => {});
+  }
+
+  logZaloEvent('token_update', `[CRM] ${paused ? 'Đã tạm dừng AI (Handover)' : 'Đã bật lại Bot AI'} cho khách ${userId}`);
+  return res.json({ success: true, userId, humanTakeover: paused });
 });
 
 // PUT /api/crm/customers/:userId - Cập nhật thông tin khách hàng (Tên, SĐT, Địa chỉ)

@@ -1588,8 +1588,8 @@ export function getNextQuestionAndReplies(
 
       return {
         question: cSnippet
-          ? `Dạ em đã ghi nhận ${cSnippet} rồi ạ. Anh/chị cho em xin địa chỉ lấy hàng chi tiết (kèm phường/xã) với nhé ạ.`
-          : 'Dạ bên em chuyên dịch vụ chuyển phát hỏa tốc, giao nhận tận nơi. Anh/chị cho em xin địa chỉ lấy hàng chi tiết (kèm phường/xã) với nhé ạ.',
+          ? `Dạ em đã ghi nhận ${cSnippet} rồi ạ. Anh/chị cho em xin địa chỉ lấy hàng (kèm phường/xã) để em kiểm tra tuyến nhé?`
+          : 'Bên em chuyên dịch vụ chuyển phát hỏa tốc, giao nhận tận nơi. Anh/chị cho em xin địa chỉ lấy hàng (kèm phường/xã) nhé?',
         fieldLabel: 'Địa chỉ lấy hàng (cần chi tiết đến phường/xã)',
         quickReplies: [],
       };
@@ -1597,8 +1597,8 @@ export function getNextQuestionAndReplies(
     case 'receiver_address':
       return {
         question: senderAddress
-          ? 'Dạ em đã lưu điểm lấy hàng rồi ạ. Anh/chị cho em xin thêm địa chỉ giao hàng chi tiết (kèm phường/xã) mình gửi đến đâu với ạ?'
-          : 'Dạ anh/chị cho em xin địa chỉ giao hàng chi tiết (kèm phường/xã) mình gửi đến đâu với nhé ạ.',
+          ? 'Dạ em đã lưu điểm lấy hàng rồi ạ. Mình cần giao hàng đến địa chỉ nào (kèm phường/xã) ạ?'
+          : 'Anh/chị cho em xin địa chỉ giao hàng cụ thể (kèm phường/xã) nhé?',
         fieldLabel: 'Địa chỉ giao hàng (cần chi tiết đến phường/xã)',
         quickReplies: [],
       };
@@ -1609,13 +1609,13 @@ export function getNextQuestionAndReplies(
         !!cargoInfo?.dimensions?.raw?.trim() ||
         (!!cargoInfo?.dimensions?.length && !!cargoInfo?.dimensions?.width && !!cargoInfo?.dimensions?.height);
 
-      let question = 'Dạ anh/chị gửi kiện hàng gì (tài liệu, hoa quả, quần áo...), nặng tầm bao nhiêu kg để bên em sắp xếp xe phù hợp ạ?';
+      let question = 'Anh/chị gửi mặt hàng gì, nặng khoảng bao nhiêu kg để bên em sắp xếp xe phù hợp ạ?';
       if (hasName && !hasWeight && !hasDims) {
-        question = `Dạ em đã lưu loại hàng là ${cargoInfo?.name || 'hàng'} rồi ạ. Kiện này nặng khoảng bao nhiêu kg hoặc kích thước thế nào anh/chị nhỉ?`;
+        question = `Dạ em đã lưu loại hàng là ${cargoInfo?.name || 'hàng'} rồi ạ. Kiện này nặng khoảng bao nhiêu kg hoặc kích thước thế nào ạ?`;
       } else if (hasWeight && !hasName && !hasDims) {
-        question = 'Dạ em đã lưu khối lượng kiện hàng. Anh/chị cho em xin thêm tên loại hàng hoặc kích thước (DxRxC cm) của kiện nhé ạ.';
+        question = 'Dạ em đã lưu khối lượng kiện hàng. Kiện của mình là mặt hàng gì (ví dụ: tài liệu, hoa quả, quần áo, đồ gia dụng...) ạ?';
       } else if (hasDims && !hasName && !hasWeight) {
-        question = 'Dạ em đã lưu kích thước kiện hàng. Anh/chị cho em xin thêm tên loại hàng hoặc khối lượng (kg) của kiện nhé ạ.';
+        question = 'Dạ em đã lưu kích thước kiện hàng. Anh/chị cho em biết thêm tên mặt hàng hoặc khối lượng (kg) nhé?';
       }
 
       return {
@@ -1626,13 +1626,13 @@ export function getNextQuestionAndReplies(
     }
     case 'delivery_time':
       return {
-        question: 'Dạ anh/chị cần bên em qua lấy và giao trong khoảng thời gian nào (như hỏa tốc trong ngày hay sáng mai) ạ?',
+        question: 'Anh/chị cần bên em qua lấy và giao trong khoảng thời gian nào (VD: trong ngày hay sáng mai) ạ?',
         fieldLabel: 'Thời gian giao nhận',
         quickReplies: [],
       };
     default:
       return {
-        question: 'Dạ đơn hàng đã đầy đủ thông tin, anh/chị xác nhận để Đi Chung lên đơn nhé ạ!',
+        question: 'Dạ đơn hàng đã đầy đủ thông tin, anh/chị xác nhận giúp em nhé!',
         fieldLabel: 'Đã hoàn tất',
         quickReplies: [],
       };
