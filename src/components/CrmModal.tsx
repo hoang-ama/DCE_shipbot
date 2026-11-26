@@ -30,12 +30,15 @@ export interface CrmCustomerItem {
   last_interaction: string;
   last_message: string;
   human_takeover?: boolean;
+  current_session_id?: string;
+  session_started_at?: string;
   shipping_info: any;
 }
 
 export interface CrmMessageItem {
   id: number | string;
   user_id: string;
+  session_id?: string;
   sender: 'user' | 'bot' | 'agent';
   sender_name: string;
   message_text: string;
@@ -63,6 +66,7 @@ export const CrmModal: React.FC<CrmModalProps> = ({
   const [replyText, setReplyText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendNotice, setSendNotice] = useState<string | null>(null);
+  const [selectedSessionFilter, setSelectedSessionFilter] = useState<string>('all');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -102,6 +106,7 @@ export const CrmModal: React.FC<CrmModalProps> = ({
   }, [isOpen]);
 
   useEffect(() => {
+    setSelectedSessionFilter('all');
     if (selectedUserId) {
       fetchMessages(selectedUserId);
     } else {
@@ -298,10 +303,19 @@ export const CrmModal: React.FC<CrmModalProps> = ({
                           </span>
                         </div>
 
-                        {c.phone && (
-                          <div className="flex items-center gap-1 text-[11px] text-emerald-700 font-semibold mb-1">
-                            <Phone className="w-3 h-3" />
-                            <span>{c.phone}</span>
+                        {(c.phone || c.current_session_id) && (
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            {c.phone && (
+                              <span className="flex items-center gap-1 text-[11px] text-emerald-700 font-semibold">
+                                <Phone className="w-3 h-3" />
+                                <span>{c.phone}</span>
+                              </span>
+                            )}
+                            {c.current_session_id && (
+                              <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-700">
+                                {c.current_session_id}
+                              </span>
+                            )}
                           </div>
                         )}
 
@@ -335,11 +349,23 @@ export const CrmModal: React.FC<CrmModalProps> = ({
                       )}
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h4 className="font-extrabold text-sm text-slate-900">{selectedCustomer.name}</h4>
                         <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">
                           ID: {selectedCustomer.user_id.slice(-6)}
                         </span>
+                        {selectedCustomer.current_session_id && (
+                          <span
+                            className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200 font-semibold"
+                            title={
+                              selectedCustomer.session_started_at
+                                ? `Phiên 24h mở lúc ${new Date(selectedCustomer.session_started_at).toLocaleString('vi-VN')}`
+                                : 'Mã phiên chat 24h hiện tại'
+                            }
+                          >
+                            Phiên: {selectedCustomer.current_session_id}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-3 text-xs text-slate-600 mt-0.5">
                         {selectedCustomer.phone && (
@@ -424,6 +450,49 @@ export const CrmModal: React.FC<CrmModalProps> = ({
                   </div>
                 )}
 
+                {/* Session Filter Pills (24h chat sessions) */}
+                {(() => {
+                  const sessionIds = Array.from(
+                    new Set(messages.map((m) => m.session_id).filter((s): s is string => Boolean(s)))
+                  );
+                  if (sessionIds.length === 0) return null;
+                  return (
+                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto text-[11px]">
+                      <span className="text-slate-500 font-semibold shrink-0 flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> Phiên 24h:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSessionFilter('all')}
+                        className={`px-2 py-0.5 rounded-full font-semibold shrink-0 cursor-pointer ${
+                          selectedSessionFilter === 'all'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        Tất cả ({messages.length})
+                      </button>
+                      {sessionIds.map((sid) => {
+                        const count = messages.filter((m) => m.session_id === sid).length;
+                        return (
+                          <button
+                            key={sid}
+                            type="button"
+                            onClick={() => setSelectedSessionFilter(sid)}
+                            className={`px-2 py-0.5 rounded-full font-mono shrink-0 cursor-pointer ${
+                              selectedSessionFilter === sid
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            {sid} ({count})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
                 {/* Message Bubble Stream */}
                 <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-slate-100/50">
                   {loadingMessages ? (
@@ -435,52 +504,66 @@ export const CrmModal: React.FC<CrmModalProps> = ({
                       Chưa có tin nhắn nào được lưu trữ cho khách hàng này.
                     </div>
                   ) : (
-                    messages.map((m, idx) => {
-                      const isCustomer = m.sender === 'user';
-                      const isAgent = m.sender === 'agent';
+                    messages
+                      .filter((m) => selectedSessionFilter === 'all' || m.session_id === selectedSessionFilter)
+                      .map((m, idx, arr) => {
+                        const isCustomer = m.sender === 'user';
+                        const isAgent = m.sender === 'agent';
+                        const prevSid = idx > 0 ? arr[idx - 1].session_id : undefined;
+                        const showSessionDivider = Boolean(m.session_id && m.session_id !== prevSid);
 
-                      return (
-                        <div
-                          key={idx}
-                          className={`flex flex-col ${isCustomer ? 'items-start' : 'items-end'}`}
-                        >
-                          {/* Sender badge & time */}
-                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mb-1 px-1">
-                            {isCustomer ? (
-                              <span className="font-semibold text-slate-600">{m.sender_name || 'Khách hàng'}</span>
-                            ) : isAgent ? (
-                              <span className="font-semibold text-purple-700 flex items-center gap-1">
-                                <UserCheck className="w-3 h-3" /> {m.sender_name || 'Tư vấn viên'}
-                              </span>
-                            ) : (
-                              <span className="font-semibold text-blue-700 flex items-center gap-1">
-                                <Bot className="w-3 h-3" /> ShipBot AI
-                              </span>
+                        return (
+                          <React.Fragment key={m.id ?? idx}>
+                            {showSessionDivider && (
+                              <div className="flex items-center gap-2 my-2">
+                                <div className="flex-1 h-px bg-slate-200" />
+                                <span className="font-mono text-[10px] px-2.5 py-0.5 rounded-full bg-slate-200/80 text-slate-600 font-semibold">
+                                  Phiên {m.session_id} &bull; {new Date(m.created_at).toLocaleDateString('vi-VN')}
+                                </span>
+                                <div className="flex-1 h-px bg-slate-200" />
+                              </div>
                             )}
-                            <span>&bull;</span>
-                            <span>
-                              {new Date(m.created_at).toLocaleTimeString('vi-VN', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </span>
-                          </div>
+                            <div
+                              className={`flex flex-col ${isCustomer ? 'items-start' : 'items-end'}`}
+                            >
+                              {/* Sender badge & time */}
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mb-1 px-1">
+                                {isCustomer ? (
+                                  <span className="font-semibold text-slate-600">{m.sender_name || 'Khách hàng'}</span>
+                                ) : isAgent ? (
+                                  <span className="font-semibold text-purple-700 flex items-center gap-1">
+                                    <UserCheck className="w-3 h-3" /> {m.sender_name || 'Tư vấn viên'}
+                                  </span>
+                                ) : (
+                                  <span className="font-semibold text-blue-700 flex items-center gap-1">
+                                    <Bot className="w-3 h-3" /> ShipBot AI
+                                  </span>
+                                )}
+                                <span>&bull;</span>
+                                <span>
+                                  {new Date(m.created_at).toLocaleTimeString('vi-VN', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                              </div>
 
-                          {/* Bubble */}
-                          <div
-                            className={`max-w-[85%] sm:max-w-[75%] p-3 rounded-2xl text-xs leading-relaxed shadow-2xs whitespace-pre-wrap ${
-                              isCustomer
-                                ? 'bg-white text-slate-800 rounded-tl-xs border border-slate-200'
-                                : isAgent
-                                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-tr-xs'
-                                : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-tr-xs'
-                            }`}
-                          >
-                            {m.message_text}
-                          </div>
-                        </div>
-                      );
-                    })
+                              {/* Bubble */}
+                              <div
+                                className={`max-w-[85%] sm:max-w-[75%] p-3 rounded-2xl text-xs leading-relaxed shadow-2xs whitespace-pre-wrap ${
+                                  isCustomer
+                                    ? 'bg-white text-slate-800 rounded-tl-xs border border-slate-200'
+                                    : isAgent
+                                    ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-tr-xs'
+                                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-tr-xs'
+                                }`}
+                              >
+                                {m.message_text}
+                              </div>
+                            </div>
+                          </React.Fragment>
+                        );
+                      })
                   )}
                   <div ref={messagesEndRef} />
                 </div>

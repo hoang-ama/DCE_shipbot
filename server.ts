@@ -265,6 +265,55 @@ function detectDeliveryTime(text: string | undefined | null): string | null {
 // Shared Vietnamese word-boundary matcher for address keywords (avoids JS `\b` bug on Unicode chars like `đ`, `ã`, `ố`, `ợ`)
 const ADDR_KEYWORD_REGEX = /(?:^|[\s,.;:/()?!])(?:số\s+\d+|phố|đường|ngõ|ngách|phường|xã|thị\s*trấn|quận|huyện|tỉnh|thành\s*phố|kđt|tòa|chung\s+cư|chợ|bến|sân\s+bay|học\s+viện|trường|bệnh\s+viện|khu\s+đô\s+thị)(?=$|[\s,.;:/()?!])/i;
 
+// Detect explicit customer request to correct/update an already-recorded field
+function isUserCorrectionMessage(text: string | undefined | null): boolean {
+  if (!text || typeof text !== 'string') return false;
+  return /(?:không\s*(?:phải|đúng|chuẩn|chính\s*xác|được)|sai\s*(?:rồi|địa\s*chỉ|thông\s*tin)?|nhầm|sửa|thay\s*đổi|chỉnh\s*lại|đổi\s*(?:lại|thành|sang)|sao\s*lại|tại\s*sao|cập\s*nhật\s*lại)\b/i.test(text);
+}
+
+// Detect conversational chatter, questions, urgency requests, COD/shipping-fee questions that are NOT addresses/cargo
+function isConversationalOrQuestion(text: string | undefined | null): boolean {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+
+  // If sentence explicitly contains a full street/ward structure, do not discard as pure chatter
+  const hasStrongAddress = /(?:^|[\s,.;:/()])(?:số\s+\d+|phố|đường|ngõ|ngách|phường|xã|thị\s*trấn|quận|huyện|tỉnh|thành\s*phố|kđt|chung\s+cư)(?=$|[\s,.;:/()])/i.test(lower);
+  if (hasStrongAddress) return false;
+
+  if (
+    /(?:trả\s*(?:phí|tiền|cước)|phí\s*ship|tiền\s*ship|cước\s*(?:phí|xe|vận\s*chuyển)|thu\s*hộ|\bcod\b|chuyển\s*khoản|bao\s*nhiêu\s*(?:tiền|cước)?|mấy\s*tiền|hết\s*(?:bao\s*)?nhiêu|tính\s*cước|báo\s*giá|được\s*(?:k|ko|không|kg)|đc\s*(?:k|ko|không)|đc\s*chưa|nhanh\s*(?:giúp|lên|nhé|nha|với|vs)|giúp\s*(?:em|anh|chị|mình|shop|e)\s*(?:với|vs|nhé|nha)?|chờ\s*(?:chút|tí|xíu)|đợi\s*(?:chút|tí|xíu)|cảm\s*ơn|thank|vâng|dạ\s*(?:vâng|ok|cảm\s*ơn)|\balo\b|chào\s*(?:shop|bạn|em|anh|chị))/i.test(lower)
+  ) {
+    return true;
+  }
+
+  // Trailing question indicator without strong address words (e.g. "lấy hàng được k ạ", "có nhận k?")
+  if (/(?:\?\s*$|(?:^|\s)(?:k|ko|không)\s*(?:ạ|nhỉ|nhé|em|anh|chị)?[.!?]*$)/i.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+// Check if string has at least one genuine location/address signal (prevents chat noise from entering address fallback)
+function hasExplicitAddressSignal(text: string | undefined | null): boolean {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (ADDR_KEYWORD_REGEX.test(trimmed)) return true;
+  if (checkHasWardCommune(trimmed)) return true;
+  if (trimmed.includes(',')) return true;
+  if (/^\d+[a-zA-Z]?(?:\/\d+)*\s+[a-zA-ZÀ-ỹ]/i.test(trimmed)) return true;
+  if (resolveAdministrativeAddress(trimmed).hasWardCommune) return true;
+  const lower = trimmed.toLowerCase();
+  const unaccented = removeVietnameseDiacritics(trimmed);
+  for (const item of LANDMARK_REVERSE_GEOCODE) {
+    if (item.pattern.test(lower) || item.unaccentedPattern.test(unaccented)) return true;
+  }
+  return false;
+}
+
 // Check if string is NOT a valid address (conversational fillers, pure pronouns, delivery times, weights, dimensions, or cargo names)
 function isNotValidAddress(text: string | undefined | null): boolean {
   if (!text || typeof text !== 'string') return true;
@@ -274,6 +323,7 @@ function isNotValidAddress(text: string | undefined | null): boolean {
 
   // If text starts with conversational pronouns + verbs: "anh cần", "tôi muốn", etc.
   if (/^(?:anh|em|chị|tôi|mình|bác|chú|cô)\s+(?:cần|muốn|nhờ|hỏi)/i.test(lower)) return true;
+  if (isConversationalOrQuestion(cleaned)) return true;
 
   const hasAddrKeyword = ADDR_KEYWORD_REGEX.test(lower);
 
@@ -1740,11 +1790,14 @@ function smartExtractVietnamese(text: string, current: any) {
   }
 
   // 6. Detect Addresses (Sender & Receiver)
+  const isCorrection = isUserCorrectionMessage(text);
+  const isChatNoiseOrQuestion = isConversationalOrQuestion(text);
   // Guard: Nếu khách chỉ đang trả lời về thời gian giao nhận (VD: "Qua lấy, giao trong ngày hoặc sang hôm sau cũng đc") -> KHÔNG tách địa chỉ!
   const hasAnyAddressKeyword = ADDR_KEYWORD_REGEX.test(text);
   const isPureDeliveryTimeReply =
     (Boolean(detectDeliveryTime(text)) && !hasAnyAddressKeyword) ||
     (!hasAnyAddressKeyword && /(?:cũng\s+(?:được|đc)|tùy\s+bên\s+em|lúc\s+nào\s+cũng|hôm\s+sau|sang\s+hôm\s+sau)/i.test(text));
+  const skipAddressExtraction = isPureDeliveryTimeReply || (isChatNoiseOrQuestion && !hasAnyAddressKeyword);
 
   // Step 6A: Check Pattern A: "từ [SENDER] (đi|đến|tới|sang|vào|về|xuống|lên|ra|giao đến|giao tới) [RECEIVER]"
   const tuMatch = text.match(/(?:^|\s+)từ\s+(.+?)\s+(?:đi|đến|tới|sang|vào|về|xuống|lên|ra|giao(?:\s+(?:đến|tới|vào|sang|về|xuống|lên|ra|ở|tại|cho))?)\s+([^;\n]+)/i);
@@ -1791,10 +1844,10 @@ function smartExtractVietnamese(text: string, current: any) {
   let senderCandidate = '';
   let receiverCandidate = '';
 
-  const hasSenderKeyword = /(?:^|\s+)(?:lấy|gửi\s+từ|từ)\b/i.test(text);
-  const hasReceiverKeyword = /(?:^|\s+)(?:giao|gửi\s+(?:đến|cho|tới)|nhận|đến|tới|sang|vào|về|xuống|lên|ra)\b/i.test(text);
+  const hasSenderKeyword = /(?:^|\s+)(?:lấy\s+(?:hàng\s+)?(?:ở|tại)|gửi\s+từ|từ)\b/i.test(text);
+  const hasReceiverKeyword = /(?:^|\s+)(?:giao\s+(?:hàng\s+)?(?:đến|tới|ở|tại|sang|vào|về|cho)|gửi\s+(?:đến|cho|tới)|đến|tới|sang|vào|về|xuống|lên|ra)\b/i.test(text);
 
-  if (!isPureDeliveryTimeReply) {
+  if (!skipAddressExtraction) {
     if (tuMatch && tuMatch[1] && tuMatch[2]) {
       senderCandidate = cleanAddressText(tuMatch[1]);
       receiverCandidate = cleanAddressText(tuMatch[2]);
@@ -1829,8 +1882,11 @@ function smartExtractVietnamese(text: string, current: any) {
     if (senderCandidate && !isNotValidAddress(senderCandidate)) {
       const sResolved = reverseGeocodeAddress(senderCandidate);
       if (sResolved.address && !isGenericCargoWord(sResolved.address) && !isNotValidAddress(sResolved.address)) {
-        updated.sender.address = sResolved.address;
-        updated.sender.hasWardCommune = sResolved.hasWardCommune;
+        const canUpdateSender = !updated.sender.address || isCorrection || (!updated.sender.hasWardCommune && sResolved.hasWardCommune) || Boolean(tuMatch || layMatch);
+        if (canUpdateSender) {
+          updated.sender.address = sResolved.address;
+          updated.sender.hasWardCommune = sResolved.hasWardCommune;
+        }
       }
     }
     if (receiverCandidate && !isNotValidAddress(receiverCandidate)) {
@@ -1838,18 +1894,21 @@ function smartExtractVietnamese(text: string, current: any) {
       if (!isNotValidAddress(cleanReceiver)) {
         const rResolved = reverseGeocodeAddress(cleanReceiver);
         if (rResolved.address && !isGenericCargoWord(rResolved.address) && !isNotValidAddress(rResolved.address)) {
-          updated.receiver.address = rResolved.address;
-          updated.receiver.hasWardCommune = rResolved.hasWardCommune;
+          const canUpdateReceiver = !updated.receiver.address || isCorrection || (!updated.receiver.hasWardCommune && rResolved.hasWardCommune) || Boolean(tuMatch || layMatch);
+          if (canUpdateReceiver) {
+            updated.receiver.address = rResolved.address;
+            updated.receiver.hasWardCommune = rResolved.hasWardCommune;
+          }
         }
       }
     }
-  } else if (!isPureDeliveryTimeReply) {
+  } else if (!skipAddressExtraction) {
     // Single address mentioned in message
     let candidate = '';
     const addrMatch = text.match(/(?:ở|tại|lấy\s+(?:hàng\s+)?tại|lấy\s+(?:hàng\s+)?ở|địa chỉ|giao\s+(?:hàng\s+)?tại|giao\s+(?:hàng\s+)?đến|giao\s+(?:hàng\s+)?ở|giao\s+(?:hàng\s+)?tới|(?<!(?:chưa|dưới|khoảng|tầm)\s+)(?:đến|tới))\s+(?!\d+\s*(?:kg|kilo|kilogram|cân|g|gram|tấn)\b)([^,.\n]+)/i);
     if (addrMatch && addrMatch[1]) {
       const c = cleanAddressText(addrMatch[1]);
-      if (!isNotValidAddress(c)) {
+      if (!isNotValidAddress(c) && hasExplicitAddressSignal(c)) {
         candidate = c;
       }
     }
@@ -1864,7 +1923,15 @@ function smartExtractVietnamese(text: string, current: any) {
         candidate = geoCheck.address;
       } else {
         const isAnsweringAddress = current?.nextMissingKey === 'sender_address' || current?.nextMissingKey === 'receiver_address';
-        if (isAnsweringAddress && !isValidVNPhone(text) && !detectCargoCategory(text) && !detectDeliveryTime(text) && !isNotValidAddress(text)) {
+        if (
+          isAnsweringAddress &&
+          !isValidVNPhone(text) &&
+          !detectCargoCategory(text) &&
+          !detectDeliveryTime(text) &&
+          !isNotValidAddress(text) &&
+          !isChatNoiseOrQuestion &&
+          hasExplicitAddressSignal(text)
+        ) {
           candidate = cleanAddressText(text);
         }
       }
@@ -1873,26 +1940,33 @@ function smartExtractVietnamese(text: string, current: any) {
     if (candidate && !isGenericCargoWord(candidate) && !isNotValidAddress(candidate)) {
       const resolved = reverseGeocodeAddress(candidate);
       if (resolved.address && !isNotValidAddress(resolved.address)) {
-        if (hasReceiverKeyword && !hasSenderKeyword) {
-          updated.receiver.address = resolved.address;
-          updated.receiver.hasWardCommune = resolved.hasWardCommune;
-        } else if (hasSenderKeyword && !hasReceiverKeyword) {
-          updated.sender.address = resolved.address;
-          updated.sender.hasWardCommune = resolved.hasWardCommune;
-        } else if (current?.nextMissingKey === 'receiver_address') {
-          updated.receiver.address = resolved.address;
-          updated.receiver.hasWardCommune = resolved.hasWardCommune;
-        } else if (current?.nextMissingKey === 'sender_address') {
-          updated.sender.address = resolved.address;
-          updated.sender.hasWardCommune = resolved.hasWardCommune;
-        } else {
-          // If no context, prioritize whichever is missing
-          if (!updated.sender.address || !updated.sender.hasWardCommune) {
+        const assignSender = () => {
+          if (!updated.sender.address || isCorrection || (!updated.sender.hasWardCommune && resolved.hasWardCommune)) {
             updated.sender.address = resolved.address;
             updated.sender.hasWardCommune = resolved.hasWardCommune;
-          } else {
+          }
+        };
+        const assignReceiver = () => {
+          if (!updated.receiver.address || isCorrection || (!updated.receiver.hasWardCommune && resolved.hasWardCommune)) {
             updated.receiver.address = resolved.address;
             updated.receiver.hasWardCommune = resolved.hasWardCommune;
+          }
+        };
+
+        if (hasReceiverKeyword && !hasSenderKeyword) {
+          assignReceiver();
+        } else if (hasSenderKeyword && !hasReceiverKeyword) {
+          assignSender();
+        } else if (current?.nextMissingKey === 'receiver_address' && !updated.receiver.address) {
+          assignReceiver();
+        } else if (current?.nextMissingKey === 'sender_address' && !updated.sender.address) {
+          assignSender();
+        } else {
+          // If no context, ONLY fill whichever field is still missing (never overwrite an already-valid address!)
+          if (!updated.sender.address || !updated.sender.hasWardCommune) {
+            assignSender();
+          } else if (!updated.receiver.address || !updated.receiver.hasWardCommune) {
+            assignReceiver();
           }
         }
       }
@@ -1900,16 +1974,19 @@ function smartExtractVietnamese(text: string, current: any) {
   }
 
   // 8. Detect Item Name / Category (Bắt buộc là tên loại hàng: Hoa quả, Tài liệu, Quần áo...)
+  const canUpdateCargoName = !updated.cargo.name || isGenericCargoWord(updated.cargo.name) || isCorrection;
   const detectedCategory = detectCargoCategory(text);
   if (detectedCategory) {
-    updated.cargo.name = detectedCategory;
-    updated.cargo.category = detectedCategory;
-  } else {
+    if (canUpdateCargoName) {
+      updated.cargo.name = detectedCategory;
+      updated.cargo.category = detectedCategory;
+    }
+  } else if (canUpdateCargoName) {
     // Only capture if user explicitly stated what the item is (e.g., "hàng là bánh chưng", "loại hàng là hồ sơ", "mặt hàng là tranh")
     const cargoNameMatch = text.match(/(?:loại\s+hàng|mặt\s+hàng|tên\s+hàng|hàng\s+là)\s*(?::|là)?\s*([a-zA-Z0-9À-ỹ\s]{2,30}?)(?=\s+(?:nặng|khối\s+lượng|kích\s+thước|sáng|chiều|\d+\s*kg|\d+\s*g|$))/i);
     if (cargoNameMatch && cargoNameMatch[1]) {
       const rawName = cargoNameMatch[1].trim();
-      if (!isGenericCargoWord(rawName)) {
+      if (!isGenericCargoWord(rawName) && !isConversationalOrQuestion(rawName)) {
         const catFromName = detectCargoCategory(rawName);
         if (catFromName) {
           updated.cargo.name = catFromName;
@@ -1928,6 +2005,7 @@ function smartExtractVietnamese(text: string, current: any) {
       const isSkipPhrase = /^(?:ok|oke|không|chưa|chưa\s*biết|chào|alo|xin\s*chào|có|được|gì\s*cũng\s*được|\d+)$/i.test(candidateItem) ||
         isValidVNPhone(candidateItem) ||
         Boolean(detectDeliveryTime(candidateItem)) ||
+        isConversationalOrQuestion(candidateItem) ||
         /\b\d+\s*(?:kg|kilo|cân|g|gram)\b/i.test(candidateItem) ||
         hasAnyAddressKeyword;
       if (candidateItem.length >= 2 && candidateItem.length <= 45 && wordCount <= 6 && !isGenericCargoWord(candidateItem) && !isSkipPhrase) {
@@ -1944,13 +2022,16 @@ function smartExtractVietnamese(text: string, current: any) {
   // 9. Delivery Time (Thời gian giao nhận dạng text)
   const detectedTime = detectDeliveryTime(text);
   if (detectedTime) {
-    updated.deliveryTime = detectedTime;
-  } else if (current?.nextMissingKey === 'delivery_time' && text.trim().length > 1) {
-    // If user is directly answering delivery time question, ensure it is NOT an address or landmark
+    if (!updated.deliveryTime || isCorrection) {
+      updated.deliveryTime = detectedTime;
+    }
+  } else if (current?.nextMissingKey === 'delivery_time' && !updated.deliveryTime && text.trim().length > 1) {
+    // If user is directly answering delivery time question, ensure it is NOT an address, landmark, or unrelated question
     const isAddrLike =
       /(?:chợ|tòa|landmark|lanmark|keangnam|bitexco|quận|phường|xã|huyện|tỉnh|đường|phố|ngõ|ngách|bến\s*xe|sân\s*bay|hà\s*nội|hồ\s*chí\s*minh|đà\s*nẵng|bến\s*thành)/i.test(text) ||
-      checkHasWardCommune(text);
-    if (!isAddrLike && !text.toLowerCase().includes('địa chỉ') && !text.toLowerCase().includes('hàng')) {
+      checkHasWardCommune(text) ||
+      hasExplicitAddressSignal(text);
+    if (!isAddrLike && !isChatNoiseOrQuestion && !text.toLowerCase().includes('địa chỉ') && !text.toLowerCase().includes('hàng')) {
       updated.deliveryTime = text.trim();
     }
   }
@@ -2535,7 +2616,7 @@ async function processChatPipeline(
     secondLastBotMsg.includes('1) Địa chỉ lấy hàng');
 
   const isConfirm = isCustomerConfirmation(rawMessage);
-  const isCorrection = /(?:không\s*(?:phải|đúng|chuẩn|chính\s*xác|được)|sai\s*(?:rồi|địa\s*chỉ|thông\s*tin)?|nhầm|sửa|thay\s*đổi|chỉnh\s*lại|đổi\s*(?:lại|thành|sang)|sao\s*lại|tại\s*sao)\b/i.test(rawMessage);
+  const isCorrection = isUserCorrectionMessage(rawMessage);
 
   if (isFormPreviouslySent && isConfirm && !isCorrection) {
     const code = currentInfo?.trackingCode || generateTrackingCode();
@@ -2548,6 +2629,20 @@ async function processChatPipeline(
     return {
       reply: ORDER_CONFIRMATION_CLOSING_PHRASE,
       shippingInfo: confirmedInfo,
+      quickReplies: [],
+    };
+  }
+
+  // Khi đơn hàng ĐÃ xác nhận chờ báo giá (isConfirmed === true), nếu khách nhắn hỏi thêm ("Nhanh giúp E vs", "Ng nhận trả phí ship được k ạ")
+  // thì TUYỆT ĐỐI KHÔNG cho AI chạy lại extractor ghi đè địa chỉ/hàng hóa hay gửi lại form xác nhận!
+  if (currentInfo?.isConfirmed && !isCorrection) {
+    return {
+      reply: 'Dạ thông tin đơn hàng đã được chuyển sang bộ phận điều phối để báo giá, chuyên viên bên em sẽ phản hồi anh/chị ngay nhé ạ.',
+      shippingInfo: {
+        ...(currentInfo || {}),
+        isComplete: true,
+        isConfirmed: true,
+      },
       quickReplies: [],
     };
   }
@@ -2781,26 +2876,47 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
     }
 
     // Merge data seamlessly with currentInfo fallback: Prioritize Gemini semantic extraction over regex
-    let rawSAddr = '';
-    let rawRAddr = '';
+    // Merge data seamlessly with currentInfo protection: NEVER overwrite already-valid fields unless user explicitly corrects!
+    const existingSAddr = cleanAddressText(currentInfo?.sender?.address || '');
+    const existingRAddr = cleanAddressText(currentInfo?.receiver?.address || '');
+    const existingSValid = Boolean(existingSAddr && !isNotValidAddress(existingSAddr));
+    const existingRValid = Boolean(existingRAddr && !isNotValidAddress(existingRAddr));
 
-    if (response && response.text && parsed) {
-      const pS = parsed.sender?.address ? cleanAddressText(parsed.sender.address) : '';
-      const pR = parsed.receiver?.address ? cleanAddressText(parsed.receiver.address) : '';
+    const sanitizeCandidateAddr = (addr: string | undefined | null): string => {
+      const cleaned = cleanAddressText(addr || '');
+      if (!cleaned || isNotValidAddress(cleaned) || isConversationalOrQuestion(cleaned) || detectDeliveryTime(cleaned)) {
+        return '';
+      }
+      return cleaned;
+    };
 
-      rawSAddr = (!isNotValidAddress(pS) ? pS : '') ||
-        (!isNotValidAddress(fastExtracted.sender?.address) ? cleanAddressText(fastExtracted.sender?.address) : '') ||
-        cleanAddressText(currentInfo?.sender?.address || '');
+    const fastSAddr = sanitizeCandidateAddr(fastExtracted.sender?.address);
+    const fastRAddr = sanitizeCandidateAddr(fastExtracted.receiver?.address);
+    const gemSAddr = response && response.text && parsed ? sanitizeCandidateAddr(parsed.sender?.address) : '';
+    const gemRAddr = response && response.text && parsed ? sanitizeCandidateAddr(parsed.receiver?.address) : '';
 
-      rawRAddr = (!isNotValidAddress(pR) ? pR : '') ||
-        (!isNotValidAddress(fastExtracted.receiver?.address) ? cleanAddressText(fastExtracted.receiver?.address) : '') ||
-        cleanAddressText(currentInfo?.receiver?.address || '');
-    } else {
-      rawSAddr = (!isNotValidAddress(fastExtracted.sender?.address) ? cleanAddressText(fastExtracted.sender?.address) : '') ||
-        cleanAddressText(currentInfo?.sender?.address || '');
-      rawRAddr = (!isNotValidAddress(fastExtracted.receiver?.address) ? cleanAddressText(fastExtracted.receiver?.address) : '') ||
-        cleanAddressText(currentInfo?.receiver?.address || '');
-    }
+    const pickSafeAddress = (
+      existing: string,
+      existingHasWard: boolean,
+      existingIsValid: boolean,
+      fastCand: string,
+      gemCand: string
+    ): string => {
+      if (existingIsValid && existingHasWard && !isCorrection) {
+        if (fastCand && fastCand !== existing && checkHasWardCommune(fastCand)) {
+          return fastCand;
+        }
+        return existing;
+      }
+      if (existingIsValid && !isCorrection && !fastCand && (!gemCand || !hasExplicitAddressSignal(message))) {
+        return existing;
+      }
+      const bestNew = (gemCand && hasExplicitAddressSignal(gemCand) ? gemCand : '') || fastCand || (gemCand && hasExplicitAddressSignal(message) ? gemCand : '');
+      return bestNew || existing;
+    };
+
+    let rawSAddr = pickSafeAddress(existingSAddr, Boolean(currentInfo?.sender?.hasWardCommune), existingSValid, fastSAddr, gemSAddr);
+    let rawRAddr = pickSafeAddress(existingRAddr, Boolean(currentInfo?.receiver?.hasWardCommune), existingRValid, fastRAddr, gemRAddr);
 
     // Prevent duplicate address being assigned to both sender and receiver when only one was provided
     if (rawSAddr && rawRAddr && rawSAddr.toLowerCase() === rawRAddr.toLowerCase()) {
@@ -2830,9 +2946,9 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
     const sHasWard = Boolean(sGeo.hasWardCommune || parsed.sender?.hasWardCommune || checkHasWardCommune(sAddr) || currentInfo?.sender?.hasWardCommune);
     const rHasWard = Boolean(rGeo.hasWardCommune || parsed.receiver?.hasWardCommune || checkHasWardCommune(rAddr) || currentInfo?.receiver?.hasWardCommune);
 
-    // Ensure addresses are not invalid phrases (like "anh cần" or delivery times)
-    const finalSAddr = isGenericCargoWord(sAddr) || isNotValidAddress(sAddr) ? '' : sAddr;
-    const finalRAddr = isGenericCargoWord(rAddr) || isNotValidAddress(rAddr) ? '' : rAddr;
+    // Ensure addresses are not invalid phrases (like "anh cần", questions, or delivery times)
+    const finalSAddr = isGenericCargoWord(sAddr) || isNotValidAddress(sAddr) || isConversationalOrQuestion(sAddr) ? '' : sAddr;
+    const finalRAddr = isGenericCargoWord(rAddr) || isNotValidAddress(rAddr) || isConversationalOrQuestion(rAddr) ? '' : rAddr;
 
     const mergedSender = {
       name: parsed.sender?.name?.trim() || fastExtracted.sender?.name || currentInfo?.sender?.name || '',
@@ -2848,53 +2964,63 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       hasWardCommune: finalRAddr ? rHasWard : false,
     };
 
-    let dimRaw = parsed.cargo?.dimensions?.raw?.trim() || fastExtracted.cargo?.dimensions?.raw || '';
-    const l = parsed.cargo?.dimensions?.length ?? fastExtracted.cargo?.dimensions?.length ?? null;
-    const w = parsed.cargo?.dimensions?.width ?? fastExtracted.cargo?.dimensions?.width ?? null;
-    const h = parsed.cargo?.dimensions?.height ?? fastExtracted.cargo?.dimensions?.height ?? null;
+    const existingCargoName = currentInfo?.cargo?.name && !isGenericCargoWord(currentInfo.cargo.name) ? currentInfo.cargo.name.trim() : '';
+    const existingDimRaw = currentInfo?.cargo?.dimensions?.raw?.trim() || '';
+    let dimRaw = (!isCorrection && existingDimRaw) ? existingDimRaw : (parsed.cargo?.dimensions?.raw?.trim() || fastExtracted.cargo?.dimensions?.raw || existingDimRaw || '');
+    const l = (!isCorrection && currentInfo?.cargo?.dimensions?.length) ? currentInfo.cargo.dimensions.length : (parsed.cargo?.dimensions?.length ?? fastExtracted.cargo?.dimensions?.length ?? null);
+    const w = (!isCorrection && currentInfo?.cargo?.dimensions?.width) ? currentInfo.cargo.dimensions.width : (parsed.cargo?.dimensions?.width ?? fastExtracted.cargo?.dimensions?.width ?? null);
+    const h = (!isCorrection && currentInfo?.cargo?.dimensions?.height) ? currentInfo.cargo.dimensions.height : (parsed.cargo?.dimensions?.height ?? fastExtracted.cargo?.dimensions?.height ?? null);
 
     if (!dimRaw && l && w && h) {
       dimRaw = `${l}x${w}x${h} cm`;
     }
 
-    // Normalize cargo name to category (Tên loại hàng: Tài liệu, Hoa quả, Quần áo...)
-    let cargoName = parsed.cargo?.name?.trim() || fastExtracted.cargo?.name || '';
-    if (isGenericCargoWord(cargoName)) {
-      cargoName = '';
+    // Normalize cargo name to category (Tên loại hàng: Tài liệu, Hoa quả, Quần áo...) & protect existing cargo name
+    let cargoName = (!isCorrection && existingCargoName)
+      ? existingCargoName
+      : (parsed.cargo?.name?.trim() || fastExtracted.cargo?.name || existingCargoName || '');
+    if (isGenericCargoWord(cargoName) || isConversationalOrQuestion(cargoName)) {
+      cargoName = existingCargoName || '';
     }
-    let specialNotes = parsed.cargo?.specialNotes?.trim() || fastExtracted.cargo?.specialNotes || '';
+    let specialNotes = parsed.cargo?.specialNotes?.trim() || fastExtracted.cargo?.specialNotes || currentInfo?.cargo?.specialNotes || '';
 
     const catDetected = detectCargoCategory(cargoName) || detectCargoCategory(message) || detectCargoCategory(fastExtracted.cargo?.name);
-    if (catDetected) {
+    if (catDetected && (isCorrection || !existingCargoName)) {
       if (cargoName && cargoName.toLowerCase() !== catDetected.toLowerCase() && !specialNotes && !isGenericCargoWord(cargoName)) {
         specialNotes = cargoName;
       }
       cargoName = catDetected;
     }
 
+    const existingWeight = currentInfo?.cargo?.weight?.trim() || '';
+    const existingWeightKg = currentInfo?.cargo?.weightKg ?? null;
     const mergedCargo = {
       name: cargoName,
-      weight: parsed.cargo?.weight?.trim() || fastExtracted.cargo?.weight || '',
-      weightKg: parsed.cargo?.weightKg ?? fastExtracted.cargo?.weightKg ?? null,
+      weight: (!isCorrection && existingWeight) ? existingWeight : (parsed.cargo?.weight?.trim() || fastExtracted.cargo?.weight || existingWeight || ''),
+      weightKg: (!isCorrection && existingWeightKg) ? existingWeightKg : (parsed.cargo?.weightKg ?? fastExtracted.cargo?.weightKg ?? existingWeightKg ?? null),
       dimensions: {
         length: l,
         width: w,
         height: h,
         raw: dimRaw,
       },
-      category: catDetected || parsed.cargo?.category?.trim() || fastExtracted.cargo?.category || 'Bưu phẩm / Hàng tiêu dùng',
+      category: catDetected || parsed.cargo?.category?.trim() || fastExtracted.cargo?.category || currentInfo?.cargo?.category || 'Bưu phẩm / Hàng tiêu dùng',
       specialNotes,
     };
 
-    let mergedDeliveryTime = parsed.deliveryTime?.trim() || fastExtracted.deliveryTime || detectDeliveryTime(message) || '';
+    const existingDeliveryTime = currentInfo?.deliveryTime?.trim() || '';
+    const explicitNewTime = fastExtracted.deliveryTime || detectDeliveryTime(message) || '';
+    let mergedDeliveryTime = (!isCorrection && existingDeliveryTime)
+      ? (explicitNewTime && isCorrection ? explicitNewTime : existingDeliveryTime)
+      : (explicitNewTime || (parsed.deliveryTime?.trim() && !isConversationalOrQuestion(parsed.deliveryTime) ? parsed.deliveryTime.trim() : '') || existingDeliveryTime || '');
     if (mergedDeliveryTime) {
       const isInvalidGap = /^(?:gấp|cần\s*gấp|gửi\s*gấp|hàng\s*gấp|rất\s*gấp|đi\s*gấp|lấy\s*gấp|giao\s*gấp)$/i.test(mergedDeliveryTime.trim());
       const isAddr =
         /(?:chợ|tòa|landmark|lanmark|keangnam|bitexco|quận|phường|xã|huyện|tỉnh|đường|phố|ngõ|ngách|bến\s*xe|sân\s*bay|hà\s*nội|hồ\s*chí\s*minh|đà\s*nẵng|bến\s*thành)/i.test(mergedDeliveryTime) ||
         checkHasWardCommune(mergedDeliveryTime) ||
         reverseGeocodeAddress(mergedDeliveryTime).hasWardCommune;
-      if (isAddr || isInvalidGap) {
-        mergedDeliveryTime = '';
+      if (isAddr || isInvalidGap || isConversationalOrQuestion(mergedDeliveryTime)) {
+        mergedDeliveryTime = existingDeliveryTime || '';
       }
     }
 
@@ -3128,8 +3254,21 @@ function logZaloEvent(type: ZaloLogEntry['type'], summary: string, details?: any
   console.log(`[Zalo OA Event] [${type}] ${summary}`);
 }
 
-// In-memory conversation state per Zalo User (Preserves full shippingInfo & history)
+// Thời hạn cố định 1 phiên chat: 24 giờ kể từ lúc bắt đầu session (tin nhắn đầu của khách hoặc lời chào từ Bot/Ops)
+const CHAT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+export function generateChatSessionId(): string {
+  const date = new Date();
+  const d = String(date.getDate()).padStart(2, '0');
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `CHAT-${d}${m}-${rand}`;
+}
+
+// In-memory conversation state per Zalo User (Preserves full shippingInfo, 24h sessionId & history)
 interface ZaloUserSession {
+  sessionId?: string;
+  sessionStartedAt?: number;
   history: Array<{ role: 'user' | 'model'; content: string }>;
   currentInfo: any;
   lastActive: number;
@@ -3142,21 +3281,166 @@ interface ZaloUserSession {
 }
 const zaloUserSessions = new Map<string, ZaloUserSession>();
 
+function isSessionExpired24h(sess?: ZaloUserSession | null, now = Date.now()): boolean {
+  if (!sess) return true;
+  const startTs = sess.sessionStartedAt || sess.lastActive || 0;
+  if (!startTs) return true;
+  return now - startTs >= CHAT_SESSION_TTL_MS;
+}
+
+// Đảm bảo luôn có 1 Chat Session hợp lệ trong khung 24h cố định từ lúc mở phiên; hết 24h tự động xoay vòng thành phiên mới
+function ensureActiveChatSession(
+  userId: string,
+  options?: {
+    forceHumanTakeover?: boolean;
+    humanTakeoverBy?: string;
+    initialInfo?: any;
+    linkedIds?: string[];
+  }
+): { session: ZaloUserSession; isNewSession: boolean } {
+  const now = Date.now();
+  const allIds = Array.from(new Set([userId, ...(options?.linkedIds || []), ...getLinkedZaloIds(userId)].filter(Boolean)));
+
+  let existing: ZaloUserSession | undefined = zaloUserSessions.get(userId);
+  if (!existing) {
+    for (const id of allIds) {
+      const candidate = zaloUserSessions.get(id);
+      if (candidate) {
+        existing = candidate;
+        break;
+      }
+    }
+  }
+
+  // Fallback khôi phục session còn hạn < 24h từ thông tin CRM nếu vừa restart server
+  if (!existing) {
+    for (const id of allIds) {
+      const cust = inMemoryCustomers.get(id);
+      if (cust?.current_session_id && cust?.session_started_at) {
+        const startedMs = new Date(cust.session_started_at).getTime();
+        if (!Number.isNaN(startedMs) && now - startedMs < CHAT_SESSION_TTL_MS) {
+          existing = {
+            sessionId: cust.current_session_id,
+            sessionStartedAt: startedMs,
+            history: [],
+            currentInfo: cust.shipping_info || {},
+            lastActive: cust.last_interaction ? new Date(cust.last_interaction).getTime() : startedMs,
+            humanTakeover: Boolean(cust.human_takeover),
+          };
+          zaloUserSessions.set(userId, existing);
+          break;
+        }
+      }
+    }
+  }
+
+  if (existing && !isSessionExpired24h(existing, now)) {
+    if (!existing.sessionId) existing.sessionId = generateChatSessionId();
+    if (!existing.sessionStartedAt) existing.sessionStartedAt = existing.lastActive || now;
+    if (!zaloUserSessions.has(userId)) {
+      zaloUserSessions.set(userId, existing);
+    }
+    return { session: existing, isNewSession: false };
+  }
+
+  // Hết hạn 24h hoặc chưa từng có session -> Mở phiên chat mới hoàn toàn (reset handover & shippingInfo)
+  const newSessionId = generateChatSessionId();
+  const fresh: ZaloUserSession = {
+    sessionId: newSessionId,
+    sessionStartedAt: now,
+    history: [],
+    currentInfo: options?.initialInfo ? JSON.parse(JSON.stringify(options.initialInfo)) : {},
+    lastActive: now,
+    humanTakeover: Boolean(options?.forceHumanTakeover),
+    humanTakeoverBy: options?.forceHumanTakeover ? options.humanTakeoverBy : undefined,
+    humanTakeoverAt: options?.forceHumanTakeover ? now : undefined,
+    idleFollowUpSent: Boolean(options?.forceHumanTakeover),
+  };
+  zaloUserSessions.set(userId, fresh);
+
+  for (const id of allIds) {
+    if (id !== userId && zaloUserSessions.has(id)) {
+      zaloUserSessions.delete(id);
+    }
+    const cust = inMemoryCustomers.get(id);
+    if (cust) {
+      cust.human_takeover = Boolean(options?.forceHumanTakeover);
+      cust.current_session_id = newSessionId;
+      cust.session_started_at = new Date(now).toISOString();
+      cust.shipping_info = fresh.currentInfo;
+    }
+  }
+
+  if (dbPool && allIds.length > 0) {
+    dbPool
+      .query(
+        `UPDATE crm_customers
+         SET human_takeover = $1,
+             current_session_id = $2,
+             session_started_at = $3
+         WHERE user_id = ANY($4::text[])`,
+        [Boolean(options?.forceHumanTakeover), newSessionId, new Date(now).toISOString(), allIds]
+      )
+      .catch(() => {});
+  }
+
+  logZaloEvent('token_update', `[Chat Session] Mở phiên mới ${newSessionId} cho khách ${userId} (cửa sổ 24h cố định)`);
+  return { session: fresh, isNewSession: true };
+}
+
+// Lưu ánh xạ hai chiều giữa user_id_by_app và OA user_id (sender.id / recipient.id) vì Zalo OA trả 2 ID khác nhau giữa user_send_* và oa_send_*
+const zaloIdAliases = new Map<string, Set<string>>();
+function linkZaloIds(...ids: Array<string | undefined | null>) {
+  const valid = Array.from(new Set(ids.map((x) => (typeof x === 'string' ? x.trim() : '')).filter(Boolean)));
+  if (valid.length < 2) return;
+  for (const a of valid) {
+    if (!zaloIdAliases.has(a)) zaloIdAliases.set(a, new Set());
+    for (const b of valid) {
+      if (a !== b) zaloIdAliases.get(a)!.add(b);
+    }
+  }
+}
+function getLinkedZaloIds(id: string | undefined | null): string[] {
+  const clean = typeof id === 'string' ? id.trim() : '';
+  if (!clean) return [];
+  const res = new Set<string>([clean]);
+  const set = zaloIdAliases.get(clean);
+  if (set) {
+    for (const alias of set) res.add(alias);
+  }
+  return Array.from(res);
+}
+
 // Lưu dấu vết tin nhắn do Bot vừa gửi ra để phân biệt với tin nhắn do Nhân viên tự nhắn trên Zalo OA App
 const recentBotOutboundMessages = new Map<string, number>();
-function markBotSentMessage(userId: string, text: string) {
-  const key = `${userId}::${String(text || '').trim().slice(0, 80)}`;
-  recentBotOutboundMessages.set(key, Date.now() + 60 * 1000);
+function normalizeOutboundKey(userId: string, text: string): string {
+  const norm = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return `${userId}::${norm}`;
 }
-function wasRecentlySentByBot(userId: string, text: string): boolean {
+function markBotSentMessage(userId: string, text: string) {
+  const exp = Date.now() + 60 * 1000;
+  for (const uid of getLinkedZaloIds(userId)) {
+    recentBotOutboundMessages.set(normalizeOutboundKey(uid, text), exp);
+  }
+}
+function wasRecentlySentByBot(userIds: string | string[], text: string): boolean {
   const now = Date.now();
   for (const [k, exp] of recentBotOutboundMessages.entries()) {
     if (exp < now) recentBotOutboundMessages.delete(k);
   }
-  const key = `${userId}::${String(text || '').trim().slice(0, 80)}`;
-  if (recentBotOutboundMessages.has(key)) {
-    recentBotOutboundMessages.delete(key);
-    return true;
+  const candidates = new Set<string>();
+  const list = Array.isArray(userIds) ? userIds : [userIds];
+  for (const id of list) {
+    for (const linked of getLinkedZaloIds(id)) {
+      candidates.add(linked);
+    }
+  }
+  for (const uid of candidates) {
+    const key = normalizeOutboundKey(uid, text);
+    if (recentBotOutboundMessages.has(key)) {
+      recentBotOutboundMessages.delete(key);
+      return true;
+    }
   }
   return false;
 }
@@ -3173,12 +3457,15 @@ export interface CrmCustomer {
   last_interaction: string;
   last_message: string;
   human_takeover?: boolean;
+  current_session_id?: string;
+  session_started_at?: string;
   shipping_info: any;
 }
 
 export interface CrmMessage {
   id: number | string;
   user_id: string;
+  session_id?: string;
   sender: 'user' | 'bot' | 'agent';
   sender_name: string;
   message_text: string;
@@ -3198,6 +3485,7 @@ export interface OrderRecordDB {
   customerName?: string;
   customerPhone?: string;
   zaloUserId?: string;
+  chatSessionId?: string;
   estimatedPrice?: number;
   baseCostVnd?: number;
   quotedBy?: string;
@@ -3222,6 +3510,7 @@ async function saveShippingOrder(orderData: {
   customerName?: string;
   customerPhone?: string;
   zaloUserId?: string;
+  chatSessionId?: string;
   estimatedPrice?: number;
   baseCostVnd?: number;
   quotedBy?: string;
@@ -3257,6 +3546,7 @@ async function saveShippingOrder(orderData: {
     customerName,
     customerPhone,
     zaloUserId: orderData.zaloUserId,
+    chatSessionId: orderData.chatSessionId,
     estimatedPrice,
     baseCostVnd,
     quotedBy: orderData.quotedBy,
@@ -3276,14 +3566,15 @@ async function saveShippingOrder(orderData: {
   if (dbPool) {
     try {
       await dbPool.query(
-        `INSERT INTO shipping_orders (id, tracking_code, status, customer_name, customer_phone, zalo_user_id, base_cost_vnd, customer_quote_vnd, quoted_by, quote_note, source, shipping_info, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+        `INSERT INTO shipping_orders (id, tracking_code, status, customer_name, customer_phone, zalo_user_id, chat_session_id, base_cost_vnd, customer_quote_vnd, quoted_by, quote_note, source, shipping_info, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
          ON CONFLICT (id) DO UPDATE
          SET tracking_code = EXCLUDED.tracking_code,
              status = EXCLUDED.status,
              customer_name = EXCLUDED.customer_name,
              customer_phone = EXCLUDED.customer_phone,
              zalo_user_id = COALESCE(EXCLUDED.zalo_user_id, shipping_orders.zalo_user_id),
+             chat_session_id = COALESCE(EXCLUDED.chat_session_id, shipping_orders.chat_session_id),
              base_cost_vnd = COALESCE(EXCLUDED.base_cost_vnd, shipping_orders.base_cost_vnd),
              customer_quote_vnd = COALESCE(EXCLUDED.customer_quote_vnd, shipping_orders.customer_quote_vnd),
              quoted_by = COALESCE(EXCLUDED.quoted_by, shipping_orders.quoted_by),
@@ -3297,6 +3588,7 @@ async function saveShippingOrder(orderData: {
           customerName,
           customerPhone,
           orderData.zaloUserId || null,
+          orderData.chatSessionId || null,
           baseCostVnd ?? null,
           estimatedPrice ?? null,
           orderData.quotedBy || null,
@@ -3305,7 +3597,7 @@ async function saveShippingOrder(orderData: {
           JSON.stringify(shippingInfo),
         ]
       );
-      console.log(`[Database] Saved shipping order ${trackingCode} (${source}, status=${status}) to PostgreSQL.`);
+      console.log(`[Database] Saved shipping order ${trackingCode} (${source}, status=${status}, session=${orderData.chatSessionId || 'N/A'}) to PostgreSQL.`);
     } catch (err: any) {
       console.error('[Database] Failed to save shipping order to PostgreSQL:', err?.message);
     }
@@ -3346,23 +3638,30 @@ async function fetchZaloUserProfile(userId: string): Promise<{ display_name?: st
   return null;
 }
 
-// Record every message into CRM (both in-memory and PostgreSQL)
+// Record every message into CRM (both in-memory and PostgreSQL), bound to the active 24h chat session ID
 async function recordCrmInteraction(
   userId: string,
   sender: 'user' | 'bot' | 'agent',
   messageText: string,
   shippingInfo?: any,
-  senderName?: string
+  senderName?: string,
+  sessionId?: string
 ) {
   const now = new Date().toISOString();
+  const sess = zaloUserSessions.get(userId);
+  const existingCust = inMemoryCustomers.get(userId);
+  const activeSessionId = sessionId || sess?.sessionId || existingCust?.current_session_id || generateChatSessionId();
+  const sessionStartedIso = sess?.sessionStartedAt
+    ? new Date(sess.sessionStartedAt).toISOString()
+    : existingCust?.session_started_at || now;
 
   // Try extracting name, phone, address from shippingInfo if present
   const detectedName = shippingInfo?.sender?.name || shippingInfo?.receiver?.name || '';
   const detectedPhone = shippingInfo?.sender?.phone || shippingInfo?.receiver?.phone || '';
-  const detectedAddress = shippingInfo?.pickup?.address || shippingInfo?.receiver?.address || '';
+  const detectedAddress = shippingInfo?.sender?.address || shippingInfo?.pickup?.address || shippingInfo?.receiver?.address || '';
 
   // Get or initialize customer
-  let customer = inMemoryCustomers.get(userId);
+  let customer = existingCust;
   if (!customer) {
     customer = {
       user_id: userId,
@@ -3374,6 +3673,9 @@ async function recordCrmInteraction(
       first_interaction: now,
       last_interaction: now,
       last_message: messageText,
+      human_takeover: Boolean(sess?.humanTakeover || sender === 'agent'),
+      current_session_id: activeSessionId,
+      session_started_at: sessionStartedIso,
       shipping_info: shippingInfo || {},
     };
     inMemoryCustomers.set(userId, customer);
@@ -3395,6 +3697,11 @@ async function recordCrmInteraction(
   } else {
     customer.last_interaction = now;
     customer.last_message = messageText;
+    customer.current_session_id = activeSessionId;
+    customer.session_started_at = sessionStartedIso;
+    if (sender === 'agent') {
+      customer.human_takeover = true;
+    }
     if (detectedName && (customer.name.startsWith('Khách Zalo') || !customer.name)) {
       customer.name = detectedName;
     }
@@ -3408,15 +3715,18 @@ async function recordCrmInteraction(
       customer.shipping_info = shippingInfo;
       if (shippingInfo.isComplete || shippingInfo.isConfirmed) {
         customer.order_count = (customer.order_count || 0) + 1;
-        // Auto-save confirmed order from Zalo OA into PostgreSQL shipbot-db
-        const alreadySaved = inMemoryOrders.some((o) => o.id.includes(userId));
-        if (!alreadySaved) {
+        // Auto-save confirmed order from Zalo OA into PostgreSQL shipbot-db (scoped per chat session!)
+        const alreadySavedInSession = inMemoryOrders.some(
+          (o) => (activeSessionId && o.chatSessionId === activeSessionId) || (!o.chatSessionId && o.id.includes(userId))
+        );
+        if (!alreadySavedInSession) {
           saveShippingOrder({
             id: `zalo-ord-${userId}-${Date.now()}`,
-            trackingCode: generateTrackingCode(),
+            trackingCode: shippingInfo?.trackingCode || generateTrackingCode(),
             customerName: customer.name,
             customerPhone: customer.phone,
             zaloUserId: userId,
+            chatSessionId: activeSessionId,
             source: 'zalo',
             shippingInfo,
           }).catch(() => { });
@@ -3430,6 +3740,7 @@ async function recordCrmInteraction(
   const msgEntry: CrmMessage = {
     id: Date.now() + Math.random(),
     user_id: userId,
+    session_id: activeSessionId,
     sender,
     sender_name: resolvedSenderName,
     message_text: messageText,
@@ -3443,16 +3754,19 @@ async function recordCrmInteraction(
   if (dbPool) {
     try {
       await dbPool.query(`
-        INSERT INTO crm_customers (user_id, name, phone, address, avatar, order_count, first_interaction, last_interaction, last_message, shipping_info)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        INSERT INTO crm_customers (user_id, name, phone, address, avatar, order_count, first_interaction, last_interaction, last_message, human_takeover, current_session_id, session_started_at, shipping_info)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         ON CONFLICT (user_id) DO UPDATE
         SET name = COALESCE(NULLIF(EXCLUDED.name, ''), crm_customers.name),
             phone = COALESCE(NULLIF(EXCLUDED.phone, ''), crm_customers.phone),
             address = COALESCE(NULLIF(EXCLUDED.address, ''), crm_customers.address),
             avatar = COALESCE(NULLIF(EXCLUDED.avatar, ''), crm_customers.avatar),
-            order_count = crm_customers.order_count + (CASE WHEN ($10::jsonb->>'isConfirmed')::boolean = true THEN 1 ELSE 0 END),
+            order_count = crm_customers.order_count + (CASE WHEN ($13::jsonb->>'isConfirmed')::boolean = true THEN 1 ELSE 0 END),
             last_interaction = EXCLUDED.last_interaction,
             last_message = EXCLUDED.last_message,
+            human_takeover = COALESCE(EXCLUDED.human_takeover, crm_customers.human_takeover),
+            current_session_id = EXCLUDED.current_session_id,
+            session_started_at = EXCLUDED.session_started_at,
             shipping_info = EXCLUDED.shipping_info;
       `, [
         customer.user_id,
@@ -3464,14 +3778,18 @@ async function recordCrmInteraction(
         customer.first_interaction,
         customer.last_interaction,
         customer.last_message,
+        Boolean(customer.human_takeover),
+        activeSessionId,
+        sessionStartedIso,
         JSON.stringify(customer.shipping_info || {}),
       ]);
 
       await dbPool.query(`
-        INSERT INTO crm_messages (user_id, sender, sender_name, message_text, shipping_info_snapshot, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6);
+        INSERT INTO crm_messages (user_id, session_id, sender, sender_name, message_text, shipping_info_snapshot, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7);
       `, [
         userId,
+        activeSessionId,
         sender,
         resolvedSenderName,
         messageText,
@@ -3564,6 +3882,10 @@ async function initDatabaseAndRestore() {
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS payment_ref VARCHAR(150);
       ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS negotiation_used BOOLEAN DEFAULT FALSE;
       ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS human_takeover BOOLEAN DEFAULT FALSE;
+      ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS current_session_id VARCHAR(50);
+      ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS session_started_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE crm_messages ADD COLUMN IF NOT EXISTS session_id VARCHAR(50);
+      ALTER TABLE shipping_orders ADD COLUMN IF NOT EXISTS chat_session_id VARCHAR(50);
       CREATE TABLE IF NOT EXISTS asterisk_call_logs (
         id VARCHAR(100) PRIMARY KEY,
         caller_phone VARCHAR(50) NOT NULL,
@@ -3575,6 +3897,7 @@ async function initDatabaseAndRestore() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_crm_messages_user_id ON crm_messages(user_id);
+      CREATE INDEX IF NOT EXISTS idx_crm_messages_session_id ON crm_messages(session_id);
       CREATE INDEX IF NOT EXISTS idx_crm_customers_last_interaction ON crm_customers(last_interaction DESC);
       CREATE INDEX IF NOT EXISTS idx_shipping_orders_created_at ON shipping_orders(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_asterisk_calls_created_at ON asterisk_call_logs(created_at DESC);
@@ -3601,18 +3924,24 @@ async function initDatabaseAndRestore() {
       console.log('[Database] Seeded initial Zalo tokens into PostgreSQL from environment.');
     }
 
-    // 2. Restore active sessions from PostgreSQL
+    // 2. Restore active sessions from PostgreSQL (skip sessions already expired past 24h fixed window)
     const sessRes = await dbPool.query(`SELECT user_id, session_data FROM zalo_sessions`);
+    const nowRestore = Date.now();
     for (const r of sessRes.rows) {
-      zaloUserSessions.set(r.user_id, r.session_data);
+      const sd = r.session_data || {};
+      if (!isSessionExpired24h(sd, nowRestore)) {
+        zaloUserSessions.set(r.user_id, sd);
+      }
     }
     if (sessRes.rows.length > 0) {
-      console.log(`[Database] Successfully restored ${sessRes.rows.length} active sessions from PostgreSQL!`);
+      console.log(`[Database] Successfully restored ${zaloUserSessions.size}/${sessRes.rows.length} active (<24h) sessions from PostgreSQL!`);
     }
 
     // 3. Restore CRM Customers from PostgreSQL
     const custRes = await dbPool.query(`SELECT * FROM crm_customers ORDER BY last_interaction DESC LIMIT 100`);
     for (const r of custRes.rows) {
+      const sessionStartedIso = r.session_started_at ? new Date(r.session_started_at).toISOString() : undefined;
+      const sessionStillValid = sessionStartedIso ? (nowRestore - new Date(sessionStartedIso).getTime() < CHAT_SESSION_TTL_MS) : true;
       inMemoryCustomers.set(r.user_id, {
         user_id: r.user_id,
         name: r.name || `Khách Zalo (${r.user_id.slice(-4)})`,
@@ -3623,7 +3952,9 @@ async function initDatabaseAndRestore() {
         first_interaction: r.first_interaction ? new Date(r.first_interaction).toISOString() : new Date().toISOString(),
         last_interaction: r.last_interaction ? new Date(r.last_interaction).toISOString() : new Date().toISOString(),
         last_message: r.last_message || '',
-        human_takeover: Boolean(r.human_takeover),
+        human_takeover: sessionStillValid ? Boolean(r.human_takeover) : false,
+        current_session_id: r.current_session_id || undefined,
+        session_started_at: sessionStartedIso,
         shipping_info: r.shipping_info || {},
       });
     }
@@ -3637,6 +3968,7 @@ async function initDatabaseAndRestore() {
       inMemoryMessages.push({
         id: r.id,
         user_id: r.user_id,
+        session_id: r.session_id || undefined,
         sender: r.sender,
         sender_name: r.sender_name,
         message_text: r.message_text,
@@ -3660,6 +3992,7 @@ async function initDatabaseAndRestore() {
         customerName: r.customer_name || '',
         customerPhone: r.customer_phone || '',
         zaloUserId: r.zalo_user_id || undefined,
+        chatSessionId: r.chat_session_id || undefined,
         baseCostVnd: r.base_cost_vnd != null ? Number(r.base_cost_vnd) : undefined,
         estimatedPrice: r.customer_quote_vnd != null ? Number(r.customer_quote_vnd) : undefined,
         quotedBy: r.quoted_by || undefined,
@@ -3851,13 +4184,15 @@ function saveSessionsCache() {
 // Initialize sessions from cache
 loadSessionsCache();
 
-// Cleanup stale sessions older than 24 hours periodically
+// Cleanup stale sessions older than fixed 24 hours from sessionStartedAt periodically
 setInterval(() => {
   const now = Date.now();
   let changed = false;
   for (const [uid, sess] of zaloUserSessions.entries()) {
-    if (now - sess.lastActive > 24 * 60 * 60 * 1000) {
+    if (isSessionExpired24h(sess, now)) {
       zaloUserSessions.delete(uid);
+      const cust = inMemoryCustomers.get(uid);
+      if (cust) cust.human_takeover = false;
       changed = true;
     }
   }
@@ -4801,56 +5136,124 @@ app.get('/api/zalo/webhook', (_req: Request, res: Response) => {
 // Zalo Webhook events (POST): Listen to incoming customer messages & human OA interventions from Zalo OA
 app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
   const { event_name, user_id_by_app, sender, recipient, message } = req.body || {};
-  const userId = user_id_by_app || sender?.id;
+  const primaryUserId = user_id_by_app || sender?.id;
   const userText = message?.text;
 
   // Acknowledge Zalo immediately to prevent retries (timeout is 3s on Zalo)
   res.status(200).json({ error: 0, message: 'Received' });
 
+  // Ghi nhận ánh xạ giữa user_id_by_app và OA user_id để đồng bộ handover
+  if (event_name && String(event_name).startsWith('user_send_')) {
+    linkZaloIds(user_id_by_app, sender?.id);
+  } else if (event_name && String(event_name).startsWith('oa_send_')) {
+    linkZaloIds(user_id_by_app, recipient?.id, (recipient as any)?.user_id);
+  }
+
+  // Log nhẹ các sự kiện không phải user_send_text (trừ user_seen_message) để tiện kiểm tra webhook OA
+  if (event_name && event_name !== 'user_send_text' && !String(event_name).includes('seen')) {
+    logZaloEvent('incoming_webhook', `[Webhook] ${event_name}`, {
+      event_name,
+      user_id_by_app,
+      senderId: sender?.id,
+      recipientId: recipient?.id || (recipient as any)?.user_id,
+      text: userText ? String(userText).slice(0, 100) : undefined,
+    });
+  }
+
   // 1. BẮT SỰ KIỆN NHÂN VIÊN CAN THIỆP TRỰC TIẾP TRÊN ZALO OA APP (oa_send_text, oa_send_image, oa_send_file...)
   if (typeof event_name === 'string' && event_name.startsWith('oa_send_')) {
-    const recipientId = recipient?.id || user_id_by_app;
+    const rawRecipientIds = Array.from(
+      new Set(
+        [
+          recipient?.id,
+          (recipient as any)?.user_id,
+          user_id_by_app,
+          ...getLinkedZaloIds(recipient?.id),
+          ...getLinkedZaloIds((recipient as any)?.user_id),
+          ...getLinkedZaloIds(user_id_by_app),
+        ].filter((x): x is string => Boolean(x))
+      )
+    );
+    // Chọn ID đang có phiên hoạt động (ưu tiên key đang lưu trong zaloUserSessions / inMemoryCustomers)
+    const recipientId =
+      rawRecipientIds.find((id) => zaloUserSessions.has(id) || inMemoryCustomers.has(id)) ||
+      user_id_by_app ||
+      recipient?.id ||
+      (recipient as any)?.user_id;
     const oaMsgText = message?.text || `[Nhân viên gửi ${event_name.replace('oa_send_', '')}]`;
-    if (recipientId && !wasRecentlySentByBot(recipientId, oaMsgText)) {
-      let sess = zaloUserSessions.get(recipientId);
-      if (!sess) {
-        sess = { history: [], currentInfo: {}, lastActive: Date.now() };
-        zaloUserSessions.set(recipientId, sess);
-      }
 
+    if (rawRecipientIds.length > 0 && !wasRecentlySentByBot(rawRecipientIds, oaMsgText)) {
       // Hỗ trợ lệnh nhanh từ nhân viên trên OA App: "#bot" hoặc "#ai" để bật lại AI
       if (/^#(?:bot|ai)\b/i.test(oaMsgText.trim())) {
-        sess.humanTakeover = false;
-        sess.humanTakeoverBy = undefined;
-        const cust = inMemoryCustomers.get(recipientId);
-        if (cust) cust.human_takeover = false;
+        for (const id of rawRecipientIds) {
+          const sess = zaloUserSessions.get(id);
+          if (sess) {
+            sess.humanTakeover = false;
+            sess.humanTakeoverBy = undefined;
+          }
+          const cust = inMemoryCustomers.get(id);
+          if (cust) cust.human_takeover = false;
+        }
         if (dbPool) {
-          dbPool.query(`UPDATE crm_customers SET human_takeover = FALSE WHERE user_id = $1`, [recipientId]).catch(() => {});
+          dbPool.query(`UPDATE crm_customers SET human_takeover = FALSE WHERE user_id = ANY($1::text[])`, [rawRecipientIds]).catch(() => {});
         }
         saveSessionsCache();
         logZaloEvent('token_update', `[AI Resumed] Nhân viên đã bật lại Bot AI cho khách ${recipientId}`);
         return;
       }
 
-      // Nhân viên đã nhắn tin trực tiếp -> DỪNG AI & HANDOVER hoàn toàn
-      sess.humanTakeover = true;
-      sess.humanTakeoverBy = 'Tư vấn viên (Zalo OA)';
-      sess.humanTakeoverAt = Date.now();
-      sess.idleFollowUpSent = true;
-      sess.lastActive = Date.now();
+      // Nhân viên đã nhắn tin trực tiếp -> Mở/lấy phiên 24h & DỪNG AI + HANDOVER hoàn toàn trên mọi ID liên kết của khách
+      const { session: oaSession } = ensureActiveChatSession(recipientId || rawRecipientIds[0], {
+        forceHumanTakeover: true,
+        humanTakeoverBy: 'Tư vấn viên (Zalo OA)',
+        linkedIds: rawRecipientIds,
+      });
+      oaSession.humanTakeover = true;
+      oaSession.humanTakeoverBy = 'Tư vấn viên (Zalo OA)';
+      oaSession.humanTakeoverAt = Date.now();
+      oaSession.idleFollowUpSent = true;
+      oaSession.lastActive = Date.now();
 
-      const cust = inMemoryCustomers.get(recipientId);
-      if (cust) cust.human_takeover = true;
+      for (const id of rawRecipientIds) {
+        const sess = zaloUserSessions.get(id);
+        if (sess && sess !== oaSession) {
+          sess.humanTakeover = true;
+          sess.humanTakeoverBy = 'Tư vấn viên (Zalo OA)';
+          sess.humanTakeoverAt = Date.now();
+          sess.idleFollowUpSent = true;
+          sess.lastActive = Date.now();
+          sess.sessionId = oaSession.sessionId;
+          sess.sessionStartedAt = oaSession.sessionStartedAt;
+        }
+        const cust = inMemoryCustomers.get(id);
+        if (cust) {
+          cust.human_takeover = true;
+          cust.current_session_id = oaSession.sessionId;
+          if (oaSession.sessionStartedAt) cust.session_started_at = new Date(oaSession.sessionStartedAt).toISOString();
+        }
+      }
       if (dbPool) {
-        dbPool.query(`UPDATE crm_customers SET human_takeover = TRUE WHERE user_id = $1`, [recipientId]).catch(() => {});
+        dbPool.query(
+          `UPDATE crm_customers SET human_takeover = TRUE, current_session_id = $1 WHERE user_id = ANY($2::text[])`,
+          [oaSession.sessionId || null, rawRecipientIds]
+        ).catch(() => {});
       }
 
-      await recordCrmInteraction(recipientId, 'agent', oaMsgText, sess.currentInfo, 'Tư vấn viên (Zalo OA)');
+      if (recipientId) {
+        await recordCrmInteraction(recipientId, 'agent', oaMsgText, oaSession?.currentInfo, 'Tư vấn viên (Zalo OA)', oaSession.sessionId);
+      }
       saveSessionsCache();
-      logZaloEvent('outgoing_reply', `[Human Handover - AI STOP] Nhân viên đã can thiệp trực tiếp cho khách ${recipientId}: "${oaMsgText.slice(0, 60)}"`);
+      logZaloEvent('outgoing_reply', `[Human Handover - AI STOP] Nhân viên đã can thiệp trực tiếp cho khách ${recipientId} (Session ${oaSession.sessionId}): "${oaMsgText.slice(0, 60)}"`);
     }
     return;
   }
+
+  // Dùng userId nhất quán với session đang tồn tại nếu có (giữa user_id_by_app và sender.id)
+  const incomingIds = Array.from(
+    new Set([user_id_by_app, sender?.id, ...getLinkedZaloIds(primaryUserId)].filter((x): x is string => Boolean(x)))
+  );
+  const userId =
+    incomingIds.find((id) => zaloUserSessions.has(id) || inMemoryCustomers.has(id)) || primaryUserId;
 
   if (event_name === 'user_send_text' && userId && userText) {
     logZaloEvent('incoming_webhook', `Khách hàng ${userId} nhắn: "${userText}"`, {
@@ -4958,44 +5361,59 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
 
       const isResetOrder = /^(?:tạo\s*đơn\s*mới|đơn\s*mới|hủy\s*đơn|làm\s*lại|reset)\b/i.test(trimmed);
 
-      let session = zaloUserSessions.get(userId);
-      const existingCust = inMemoryCustomers.get(userId);
-      const wasHumanTakeover = Boolean(session?.humanTakeover || existingCust?.human_takeover);
+      const { session, isNewSession } = ensureActiveChatSession(userId, { linkedIds: incomingIds });
 
-      // Reset if inactive for > 6 hours or user explicitly requested new order (khi AI đang bật)
-      if (!session || (isResetOrder && !wasHumanTakeover) || (!wasHumanTakeover && Date.now() - session.lastActive > 6 * 60 * 60 * 1000)) {
-        session = {
-          history: [],
-          currentInfo: {},
-          lastActive: Date.now(),
-          humanTakeover: wasHumanTakeover,
-        };
-        zaloUserSessions.set(userId, session);
+      let wasHumanTakeover = !isNewSession && incomingIds.some(
+        (id) => Boolean(zaloUserSessions.get(id)?.humanTakeover || inMemoryCustomers.get(id)?.human_takeover)
+      );
+      if (!isNewSession && session.humanTakeover) {
+        wasHumanTakeover = true;
+      }
+
+      // Dự phòng kiểm tra trong DB CHỈ trong cùng phiên 24h cố định (hết 24h là phiên mới -> AI tự bật lại)
+      if (!isNewSession && !wasHumanTakeover && dbPool && incomingIds.length > 0) {
+        try {
+          const dbChk = await dbPool.query(
+            `SELECT human_takeover FROM crm_customers
+             WHERE user_id = ANY($1::text[])
+               AND human_takeover = TRUE
+               AND (session_started_at IS NULL OR NOW() - session_started_at < INTERVAL '24 hours')
+             LIMIT 1`,
+            [incomingIds]
+          );
+          if (dbChk.rows.length > 0) {
+            wasHumanTakeover = true;
+          }
+        } catch {}
       }
 
       session.lastActive = Date.now();
       session.lastCustomerMessageAt = Date.now();
       session.idleFollowUpSent = false;
 
-      // Record incoming customer message in CRM
-      await recordCrmInteraction(userId, 'user', userText, session.currentInfo);
+      // Record incoming customer message in CRM (gắn Session ID 24h)
+      await recordCrmInteraction(userId, 'user', userText, session.currentInfo, undefined, session.sessionId);
 
-      // QUY TẮC 1: Khi nhân viên người thật đã can thiệp -> AI DỪNG HOÀN TOÀN (Handover)
-      if (session.humanTakeover || inMemoryCustomers.get(userId)?.human_takeover) {
+      // QUY TẮC 1: Trong phiên 24h, khi nhân viên người thật đã can thiệp -> AI DỪNG HOÀN TOÀN (Handover)
+      if (wasHumanTakeover || session.humanTakeover) {
         session.humanTakeover = true;
         saveSessionsCache();
-        console.log(`[Human Handover] AI đã dừng cho khách ${userId}, bỏ qua trả lời tự động.`);
+        console.log(`[Human Handover] AI đã dừng cho khách ${userId} (Session ${session.sessionId}, aliases: ${incomingIds.join(',')}), bỏ qua trả lời tự động.`);
         return;
       }
 
+      // QUY TẮC 4: Khách gõ "tạo đơn mới" trong vòng 24h -> GIỮ NGUYÊN sessionId & sessionStartedAt, chỉ reset dữ liệu đơn
       if (isResetOrder) {
         const resetReply = 'Dạ em đã tạo phiên đơn mới rồi ạ. Bên em chuyên dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Anh/chị cho em xin địa chỉ lấy và giao hàng nhé!';
-        session.history.push({ role: 'user', content: userText });
-        session.history.push({ role: 'model', content: resetReply });
+        session.currentInfo = {};
+        session.history = [
+          { role: 'user', content: userText },
+          { role: 'model', content: resetReply },
+        ];
         session.lastBotMessageAt = Date.now();
         saveSessionsCache();
         await sendZaloOAReply(userId, resetReply);
-        await recordCrmInteraction(userId, 'bot', resetReply, session.currentInfo);
+        await recordCrmInteraction(userId, 'bot', resetReply, session.currentInfo, undefined, session.sessionId);
         return;
       }
 
@@ -5008,7 +5426,7 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
         session.lastBotMessageAt = Date.now();
         saveSessionsCache();
         await sendZaloOAReply(userId, closingReply);
-        await recordCrmInteraction(userId, 'bot', closingReply, session.currentInfo);
+        await recordCrmInteraction(userId, 'bot', closingReply, session.currentInfo, undefined, session.sessionId);
         return;
       }
 
@@ -5029,8 +5447,8 @@ app.post('/api/zalo/webhook', async (req: Request, res: Response) => {
 
       saveSessionsCache();
       await sendZaloOAReply(userId, result.reply);
-      // Record outgoing bot response in CRM
-      await recordCrmInteraction(userId, 'bot', result.reply, result.shippingInfo);
+      // Record outgoing bot response in CRM (gắn Session ID 24h)
+      await recordCrmInteraction(userId, 'bot', result.reply, result.shippingInfo, undefined, session.sessionId);
     } catch (err: any) {
       logZaloEvent('error', `Lỗi xử lý tin nhắn của user ${userId}: ${err?.message}`);
       console.error('[Zalo OA] Error processing chat reply:', err?.message);
@@ -5046,6 +5464,7 @@ setInterval(async () => {
 
   for (const [uid, sess] of zaloUserSessions.entries()) {
     if (uid === dceOpsUserId || uid === defaultSupplierUserId) continue;
+    if (isSessionExpired24h(sess, now)) continue;
     if (sess.humanTakeover || sess.idleFollowUpSent || sess.currentInfo?.isComplete) continue;
     if (!sess.history || sess.history.length === 0) continue;
 
@@ -5068,8 +5487,8 @@ setInterval(async () => {
 
       const sent = await sendZaloOAReply(uid, followUpText);
       if (sent) {
-        await recordCrmInteraction(uid, 'bot', followUpText, sess.currentInfo, 'ShipBot (Nhắc sau 5 phút)');
-        logZaloEvent('outgoing_reply', `Đã gửi tin nhắn xin SĐT sau 5 phút không phản hồi tới ${uid}`);
+        await recordCrmInteraction(uid, 'bot', followUpText, sess.currentInfo, 'ShipBot (Nhắc sau 5 phút)', sess.sessionId);
+        logZaloEvent('outgoing_reply', `Đã gửi tin nhắn xin SĐT sau 5 phút không phản hồi tới ${uid} (Session ${sess.sessionId || 'N/A'})`);
       }
     }
   }
@@ -5112,16 +5531,22 @@ app.get('/api/crm/customers', async (req: Request, res: Response) => {
   return res.json(list);
 });
 
-// GET /api/crm/customers/:userId/messages - Lấy toàn bộ lịch sử tin nhắn của một khách hàng
+// GET /api/crm/customers/:userId/messages - Lấy toàn bộ lịch sử tin nhắn (hoặc lọc theo sessionId)
 app.get('/api/crm/customers/:userId/messages', async (req: Request, res: Response) => {
   const { userId } = req.params;
+  const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId.trim() : '';
 
   if (dbPool) {
     try {
-      const result = await dbPool.query(
-        `SELECT * FROM crm_messages WHERE user_id = $1 ORDER BY created_at ASC LIMIT 500`,
-        [userId]
-      );
+      const result = sessionId
+        ? await dbPool.query(
+            `SELECT * FROM crm_messages WHERE user_id = $1 AND session_id = $2 ORDER BY created_at ASC LIMIT 500`,
+            [userId, sessionId]
+          )
+        : await dbPool.query(
+            `SELECT * FROM crm_messages WHERE user_id = $1 ORDER BY created_at ASC LIMIT 500`,
+            [userId]
+          );
       return res.json(result.rows);
     } catch (e: any) {
       console.error('[CRM API] Error querying messages from DB:', e?.message);
@@ -5129,7 +5554,10 @@ app.get('/api/crm/customers/:userId/messages', async (req: Request, res: Respons
   }
 
   // Fallback to in-memory messages
-  const list = inMemoryMessages.filter((m) => m.user_id === userId);
+  let list = inMemoryMessages.filter((m) => m.user_id === userId);
+  if (sessionId) {
+    list = list.filter((m) => m.session_id === sessionId);
+  }
   return res.json(list);
 });
 
@@ -5142,25 +5570,34 @@ app.post('/api/crm/customers/:userId/send', async (req: Request, res: Response) 
     return res.status(400).json({ error: 'Nội dung tin nhắn không được để trống' });
   }
 
-  let session = zaloUserSessions.get(userId);
   const success = await sendZaloOAReply(userId, text.trim());
 
   if (success) {
-    if (!session) {
-      session = { history: [], currentInfo: {}, lastActive: Date.now() };
-      zaloUserSessions.set(userId, session);
-    }
+    const { session } = ensureActiveChatSession(userId, {
+      forceHumanTakeover: true,
+      humanTakeoverBy: agentName || 'Tư vấn viên (Web)',
+    });
     session.humanTakeover = true;
     session.humanTakeoverBy = agentName || 'Tư vấn viên (Web)';
     session.humanTakeoverAt = Date.now();
     session.idleFollowUpSent = true;
+    session.lastActive = Date.now();
     session.history.push({ role: 'model', content: text.trim() });
     saveSessionsCache();
 
-    const cust = inMemoryCustomers.get(userId);
-    if (cust) cust.human_takeover = true;
+    const linkedIds = getLinkedZaloIds(userId);
+    for (const id of linkedIds) {
+      const cust = inMemoryCustomers.get(id);
+      if (cust) {
+        cust.human_takeover = true;
+        cust.current_session_id = session.sessionId;
+      }
+    }
     if (dbPool) {
-      dbPool.query(`UPDATE crm_customers SET human_takeover = TRUE WHERE user_id = $1`, [userId]).catch(() => {});
+      dbPool.query(
+        `UPDATE crm_customers SET human_takeover = TRUE, current_session_id = $1 WHERE user_id = ANY($2::text[])`,
+        [session.sessionId || null, linkedIds]
+      ).catch(() => {});
     }
 
     await recordCrmInteraction(
@@ -5168,10 +5605,11 @@ app.post('/api/crm/customers/:userId/send', async (req: Request, res: Response) 
       'agent',
       text.trim(),
       session?.currentInfo,
-      agentName || 'Tư vấn viên (Web)'
+      agentName || 'Tư vấn viên (Web)',
+      session.sessionId
     );
 
-    return res.json({ success: true, humanTakeover: true, message: 'Đã gửi tin nhắn và tạm dừng AI để tư vấn viên tiếp quản!' });
+    return res.json({ success: true, humanTakeover: true, sessionId: session.sessionId, message: 'Đã gửi tin nhắn và tạm dừng AI để tư vấn viên tiếp quản!' });
   } else {
     return res.status(500).json({ success: false, error: 'Không thể gửi tin nhắn qua Zalo OA. Kiểm tra Access Token!' });
   }
@@ -5183,23 +5621,22 @@ app.post('/api/crm/customers/:userId/ai-toggle', async (req: Request, res: Respo
   const { humanTakeover } = req.body || {};
   const paused = Boolean(humanTakeover);
 
-  let session = zaloUserSessions.get(userId);
-  if (!session) {
-    session = { history: [], currentInfo: {}, lastActive: Date.now() };
-    zaloUserSessions.set(userId, session);
-  }
+  const { session } = ensureActiveChatSession(userId);
   session.humanTakeover = paused;
   session.humanTakeoverAt = paused ? Date.now() : undefined;
   saveSessionsCache();
 
-  const cust = inMemoryCustomers.get(userId);
-  if (cust) cust.human_takeover = paused;
+  const linkedIds = getLinkedZaloIds(userId);
+  for (const id of linkedIds) {
+    const cust = inMemoryCustomers.get(id);
+    if (cust) cust.human_takeover = paused;
+  }
   if (dbPool) {
-    dbPool.query(`UPDATE crm_customers SET human_takeover = $1 WHERE user_id = $2`, [paused, userId]).catch(() => {});
+    dbPool.query(`UPDATE crm_customers SET human_takeover = $1 WHERE user_id = ANY($2::text[])`, [paused, linkedIds]).catch(() => {});
   }
 
-  logZaloEvent('token_update', `[CRM] ${paused ? 'Đã tạm dừng AI (Handover)' : 'Đã bật lại Bot AI'} cho khách ${userId}`);
-  return res.json({ success: true, userId, humanTakeover: paused });
+  logZaloEvent('token_update', `[CRM] ${paused ? 'Đã tạm dừng AI (Handover)' : 'Đã bật lại Bot AI'} cho khách ${userId} (Session ${session.sessionId})`);
+  return res.json({ success: true, userId, sessionId: session.sessionId, humanTakeover: paused });
 });
 
 // PUT /api/crm/customers/:userId - Cập nhật thông tin khách hàng (Tên, SĐT, Địa chỉ)
@@ -5610,26 +6047,33 @@ app.post('/api/asterisk/incoming-call', async (req: Request, res: Response) => {
     let status = 'pending_zns';
 
     if (matchedUserId) {
-      // Khách đã từng tương tác OA -> Gửi thẳng tin nhắn chào qua Zalo OA CS API & khởi động lại phiên collect 4 thông tin
+      // Khách đã từng tương tác OA -> Mở Session mới (nếu chưa có hoặc > 24h) & gửi tin chào từ Bot
       const greetingText = `Chào anh/chị! Đi Chung Express vừa nhận được cuộc gọi từ số ${local0} tới tổng đài.\n\nBên em chuyên về dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Anh/chị vui lòng gửi em xin thông tin địa chỉ lấy hàng, địa chỉ giao hàng và thông tin hàng hóa để bên em tính cước báo giá nhanh nhất nhé ạ!`;
 
       const sessionInfo = {
         sender: { phone: local0 },
       };
-      zaloUserSessions.set(matchedUserId, {
-        history: [{ role: 'model', content: greetingText }],
-        currentInfo: sessionInfo,
-        lastActive: nowMs,
-      });
-      saveSessionsCache();
+      const { session: callSession, isNewSession } = ensureActiveChatSession(matchedUserId, { initialInfo: sessionInfo });
+      if (!callSession.humanTakeover) {
+        if (isNewSession || !callSession.currentInfo?.sender?.phone) {
+          callSession.currentInfo = { ...(callSession.currentInfo || {}), sender: { ...(callSession.currentInfo?.sender || {}), phone: local0 } };
+        }
+        callSession.history.push({ role: 'model', content: greetingText });
+        callSession.lastActive = nowMs;
+        callSession.lastBotMessageAt = nowMs;
+        saveSessionsCache();
 
-      const sent = await sendZaloOAReply(matchedUserId, greetingText);
-      if (sent) {
-        channelUsed = 'zalo_oa_cs';
-        status = 'sent_greeting_oa';
-        await recordCrmInteraction(matchedUserId, 'bot', greetingText, sessionInfo, 'Chào Từ Tổng Đài Asterisk');
+        const sent = await sendZaloOAReply(matchedUserId, greetingText);
+        if (sent) {
+          channelUsed = 'zalo_oa_cs';
+          status = 'sent_greeting_oa';
+          await recordCrmInteraction(matchedUserId, 'bot', greetingText, callSession.currentInfo, 'Chào Từ Tổng Đài Asterisk', callSession.sessionId);
+        } else {
+          status = 'oa_send_failed';
+        }
       } else {
-        status = 'oa_send_failed';
+        channelUsed = 'zalo_oa_cs';
+        status = 'skipped_human_takeover_active';
       }
     } else if (zaloZnsTemplateId) {
       // Khách mới hoàn toàn -> Gửi ZNS Template chào hỏi có nút CTA Nhắn tin ngay
