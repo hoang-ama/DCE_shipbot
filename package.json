@@ -9,15 +9,20 @@
     "start": "tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "GEMINI_API_KEY= DATABASE_URL= tsx --test tests/*.test.ts",
+    "test:ai": "GEMINI_API_KEY= DATABASE_URL= tsx --test tests/ai-routing-rules.test.ts tests/ai-trace-copy.test.ts tests/service-router.test.ts",
+    "smoke:ai": "tsx scripts/test-ai-router.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
+    "canvas-confetti": "^1.9.4",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
+    "mermaid": "^12.3.0",
     "motion": "^12.23.24",
     "pg": "^8.23.1",
     "react": "^19.0.1",
@@ -26,6 +31,7 @@
     "vite": "^8.3.0"
   },
   "devDependencies": {
+    "@types/canvas-confetti": "^1.9.0",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/pg": "^8.23.1",

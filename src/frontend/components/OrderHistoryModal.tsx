@@ -1,0 +1,276 @@
+import React, { useState } from 'react';
+import { X, History, Trash2, Copy, Check, ExternalLink, Package, Send } from 'lucide-react';
+import { OrderRecord, RoutingConfig } from '../../shared/types';
+import { generateShipmentTextSummary, generateOpsShipmentNotification, DCE_OPS_PHONE } from '../utils/logistics';
+
+interface OrderHistoryModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  orders: OrderRecord[];
+  onDeleteOrder: (id: string) => void;
+  onClearAll: () => void;
+  onSelectOrder: (order: OrderRecord) => void;
+  routingConfig?: RoutingConfig;
+}
+
+export const OrderHistoryModal: React.FC<OrderHistoryModalProps> = ({
+  isOpen,
+  onClose,
+  orders,
+  onDeleteOrder,
+  onClearAll,
+  onSelectOrder,
+  routingConfig,
+}) => {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [opsNotifiedId, setOpsNotifiedId] = useState<string | null>(null);
+
+  if (!isOpen) return null;
+
+  const opsPhone = routingConfig?.opsPhone || DCE_OPS_PHONE;
+
+  const handleCopy = (order: OrderRecord) => {
+    const text = generateShipmentTextSummary(order.shippingInfo, order.trackingCode);
+    navigator.clipboard.writeText(text);
+    setCopiedId(order.id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleSendOps = (order: OrderRecord) => {
+    const text = generateOpsShipmentNotification(order.shippingInfo, order.trackingCode, order.source, opsPhone);
+    navigator.clipboard.writeText(text);
+    setOpsNotifiedId(order.id);
+    setTimeout(() => setOpsNotifiedId(null), 2500);
+
+    try {
+      fetch('/api/orders/notify-ops', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: order.id,
+          trackingCode: order.trackingCode,
+          shippingInfo: order.shippingInfo,
+          source: order.source,
+          customerName: order.customerName,
+          customerPhone: order.customerPhone,
+        }),
+      }).catch(() => {});
+    } catch (_) {}
+
+    window.open(`https://zalo.me/${opsPhone}`, '_blank');
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+              <History className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-base flex items-center gap-2">
+                <span>Lịch Sử Đơn Vận Chuyển</span>
+                <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                  shipbot-db (PostgreSQL)
+                </span>
+              </h3>
+              <p className="text-xs text-slate-300">
+                {orders.length} đơn hàng đã lưu và đồng bộ trong cơ sở dữ liệu
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {orders.length > 0 && (
+              <button
+                onClick={onClearAll}
+                className="px-2.5 py-1 text-xs text-rose-300 hover:text-rose-100 hover:bg-rose-900/50 rounded-lg transition-colors"
+                title="Xóa toàn bộ lịch sử"
+              >
+                Xóa tất cả
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Content list */}
+        <div className="p-6 overflow-y-auto space-y-3 bg-slate-50/50">
+          {orders.length === 0 ? (
+            <div className="text-center py-12">
+              <Package className="w-12 h-12 text-slate-300 mx-auto mb-2" />
+              <p className="text-sm font-semibold text-slate-600">Chưa có đơn hàng nào được lưu</p>
+              <p className="text-xs text-slate-400 mt-1">
+                Hãy trò chuyện với ShipBot và bấm "Xác nhận lên đơn" để lưu đơn hàng tại đây.
+              </p>
+            </div>
+          ) : (
+            orders.map((order) => (
+              <div
+                key={order.id}
+                className="p-4 bg-white rounded-xl border border-slate-200 shadow-2xs hover:border-blue-300 transition-all"
+              >
+                <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100 mb-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-mono font-bold text-xs text-blue-600">
+                      {order.trackingCode}
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+                      order.status === 'quoting'
+                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                        : order.status === 'quoted'
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        : order.status === 'dispatched' || order.paymentStatus === 'paid'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    }`}>
+                      {order.status === 'quoting'
+                        ? 'Chờ báo giá'
+                        : order.status === 'quoted'
+                        ? `Đã báo giá${order.estimatedPrice ? `: ${order.estimatedPrice.toLocaleString('vi-VN')} đ` : ''}`
+                        : order.status === 'dispatched'
+                        ? `${order.paymentStatus === 'paid' ? 'Đã TT VietQR' : 'Đã lên lệnh COD'}${order.estimatedPrice ? ` • ${order.estimatedPrice.toLocaleString('vi-VN')} đ` : ''}`
+                        : `Đã tạo đơn${order.estimatedPrice ? ` • ${order.estimatedPrice.toLocaleString('vi-VN')} đ` : ''}`}
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
+                      order.source === 'zalo'
+                        ? 'bg-cyan-50 text-cyan-700 border-cyan-200'
+                        : 'bg-blue-50 text-blue-700 border-blue-200'
+                    }`}>
+                      {order.source === 'zalo' ? 'Kênh Zalo OA' : 'Web App'}
+                    </span>
+                    {order.customerName && (
+                      <span className="text-[10px] text-slate-500 font-medium">
+                        • {order.customerName}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-slate-400">{order.createdAt}</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mb-3">
+                  <div>
+                    <span className="text-slate-400 text-[11px]">Lấy tại: </span>
+                    <span className="text-slate-800 text-[11px] font-medium block line-clamp-2">
+                      {order.shippingInfo.sender.address}
+                    </span>
+                    {order.shippingInfo.sender.phone && (
+                      <span className="text-slate-400 font-mono text-[10px]">SĐT: {order.shippingInfo.sender.phone}</span>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[11px]">Giao đến: </span>
+                    <span className="text-slate-800 text-[11px] font-medium block line-clamp-2">
+                      {order.shippingInfo.receiver.address}
+                    </span>
+                    {order.shippingInfo.receiver.phone && (
+                      <span className="text-slate-400 font-mono text-[10px]">SĐT: {order.shippingInfo.receiver.phone}</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-2 bg-slate-50 rounded-lg text-xs flex flex-wrap items-center justify-between gap-1 mb-3">
+                  <div>
+                    <span className="text-slate-500">Hàng hóa: </span>
+                    <span className="font-bold text-slate-800">
+                      {order.shippingInfo.cargo.name || '---'}
+                    </span>{' '}
+                    <span className="text-slate-500">
+                      {order.shippingInfo.cargo.weight ? `(${order.shippingInfo.cargo.weight})` : order.shippingInfo.cargo.weightKg ? `(${order.shippingInfo.cargo.weightKg} kg)` : ''}
+                    </span>
+                  </div>
+                  {order.shippingInfo.deliveryTime && (
+                    <span className="text-purple-700 bg-purple-50 px-2 py-0.5 rounded text-[11px] font-medium">
+                      🕒 {order.shippingInfo.deliveryTime}
+                    </span>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    onClick={() => {
+                      onSelectOrder(order);
+                      onClose();
+                    }}
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>Xem lại trên phiếu</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
+
+                  <div className="flex items-center gap-1.5">
+                    <a
+                      href={`/pay/${encodeURIComponent(order.trackingCode)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-2 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100 text-emerald-800 text-[11px] flex items-center gap-1 font-semibold transition-colors"
+                      title="Mở trang Thanh toán VietQR / Chốt COD"
+                    >
+                      <span>Thanh toán</span>
+                    </a>
+
+                    <a
+                      href={`/quote/${encodeURIComponent(order.trackingCode)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-2 py-1.5 rounded-lg border border-amber-200 bg-amber-50/70 hover:bg-amber-100 text-amber-800 text-[11px] flex items-center gap-1 font-semibold transition-colors"
+                      title="Mở Cổng Nhập Giá Nhanh (Quick Quote Portal) cho Ops / Supplier"
+                    >
+                      <span>Nhập giá</span>
+                    </a>
+
+                    <button
+                      onClick={() => handleSendOps(order)}
+                      className="px-2 py-1.5 rounded-lg border border-blue-200 bg-blue-50/70 hover:bg-blue-100 text-blue-700 text-xs flex items-center gap-1 font-semibold transition-colors cursor-pointer"
+                      title="Bắn Zalo cho DCE Ops (0934691766) để gửi Supplier báo giá"
+                    >
+                      {opsNotifiedId === order.id ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-[11px] text-emerald-700">Đã mở Zalo!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5 text-blue-600" />
+                          <span className="text-[11px]">Zalo Ops</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => handleCopy(order)}
+                      className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 text-xs flex items-center gap-1 cursor-pointer"
+                      title="Sao chép tóm tắt Zalo"
+                    >
+                      {copiedId === order.id ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => onDeleteOrder(order.id)}
+                      className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                      title="Xóa đơn này"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

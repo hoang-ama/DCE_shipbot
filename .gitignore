@@ -7,6 +7,8 @@ coverage/
 !.env.example
 .env
 .zalo_token.json
+.zalo_sessions.json
 REF. DOC/
 
 *.sql
+!src/database/migrations/*.sql

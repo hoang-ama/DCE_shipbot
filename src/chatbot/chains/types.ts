@@ -1,0 +1,1 @@
+export type ReplyContext={message:string;history:any[];currentInfo:any;extractedData:unknown;nextAction:string;nextField?:string;referenceReply:string;rejectedFields?:Record<string,string>;operation?:string};
