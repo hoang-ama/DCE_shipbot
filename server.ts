@@ -7,6 +7,8 @@ import crypto from 'crypto';
 import pg from 'pg';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import { resolveAdministrativeAddress, parseGoogleMapsLocation } from './src/data/vnAdministrative';
+import { runPassengerAgentTurn } from './chatbot/passenger-transport/agent';
+import type { PassengerAgentTurnInput } from './chatbot/passenger-transport/agent';
 import {
   calculateDCExpressPriceFromShippingInfo,
   DEFAULT_STANDARD_ROUTES,
@@ -3161,6 +3163,21 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
     return finish({ reply, shippingInfo: { ...cleanFast, ...evalResult }, quickReplies: [] }, 'rule_fallback', 'GEMINI_PIPELINE_ERROR');
   }
 }
+
+// Experimental passenger bot: the bot controller invokes the mock partner matcher when a booking is complete.
+app.post('/api/passenger-transport/agent-turn', async (req: Request, res: Response) => {
+  const { event, message, booking } = req.body || {};
+  if (event !== 'message' && event !== 'booking_ready') {
+    return res.status(400).json({ error: 'event must be message or booking_ready' });
+  }
+  try {
+    const result = await runPassengerAgentTurn({ event, message, booking } as PassengerAgentTurnInput);
+    return res.json(result);
+  } catch (error: any) {
+    console.error('[Passenger Agent] Turn failed:', error?.message);
+    return res.status(500).json({ error: error?.message || 'Passenger agent failed' });
+  }
+});
 
 // API Chat Route for Web UI
 app.post('/api/chat', async (req: Request, res: Response) => {

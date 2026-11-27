@@ -9,6 +9,7 @@ export function validateRentalBooking(value: RentalBooking): ValidationResult<Re
       return (current as Record<string, unknown>)[key];
     }, value);
     if (field.key === 'itinerary') return !Array.isArray(fieldValue) || fieldValue.length === 0;
+    if (field.key === 'passengerCount') return !(Number(fieldValue) > 0);
     return fieldValue === undefined || fieldValue === null || fieldValue === '';
   }).map((field) => field.key);
 

@@ -6,6 +6,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { ChatPanel } from './components/ChatPanel';
+import { ExperimentChatPanel } from './components/ExperimentChatPanel';
+import type { ExperimentMode } from './components/ExperimentChatPanel';
+import { PassengerBookingPanel } from './components/PassengerBookingPanel';
+import { OpsChatWindow } from './components/OpsChatWindow';
 import { WaybillCard } from './components/WaybillCard';
 import { SamplePromptsModal } from './components/SamplePromptsModal';
 import { OrderHistoryModal } from './components/OrderHistoryModal';
@@ -27,7 +31,23 @@ const STORAGE_ORDERS_KEY = 'shipbot_saved_orders_v1';
 
 export default function App() {
   const [shippingInfo, setShippingInfo] = useState<ShippingInfo>(INITIAL_SHIPPING_INFO);
-  const [selectedBusinessFlow, setSelectedBusinessFlow] = useState<BusinessFlow | null>(null);
+  const selectedBusinessFlow: BusinessFlow = 'chuyen_hang';
+  const [isExperimentMode, setIsExperimentMode] = useState(false);
+  const [experimentMode, setExperimentMode] = useState<ExperimentMode>('default');
+  const [experimentMessages, setExperimentMessages] = useState<ChatMessage[]>([{
+    id: 'experiment-welcome',
+    sender: 'bot',
+    text: 'Chào anh/chị, mình có thể hỗ trợ gì cho anh/chị hôm nay?',
+    timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+  }]);
+  const [isExperimentLoading, setIsExperimentLoading] = useState(false);
+  const [experimentId, setExperimentId] = useState(() => `experiment-${Date.now()}`);
+  const [isOpsActive, setIsOpsActive] = useState(false);
+  const [isOpsWindowOpen, setIsOpsWindowOpen] = useState(false);
+  const [opsName, setOpsName] = useState('Nguyễn An');
+  const [opsMessages, setOpsMessages] = useState<ChatMessage[]>([]);
+  const [isPassengerMatching, setIsPassengerMatching] = useState(false);
+  const [matchedPartner, setMatchedPartner] = useState<any>(null);
   const [trackingCode, setTrackingCode] = useState<string>(generateTrackingCode());
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [hasApiKey, setHasApiKey] = useState<boolean>(true);
@@ -60,7 +80,7 @@ export default function App() {
     {
       id: 'msg-welcome-1',
       sender: 'bot',
-      text: 'Chào anh/chị! Vui lòng chọn luồng nghiệp vụ ở phía trên khung chat để bắt đầu.',
+      text: 'Chào anh/chị! Bên em có thể hỗ trợ vận chuyển hàng hóa. Anh/chị cần tư vấn dịch vụ nào ạ?',
       timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -116,20 +136,6 @@ export default function App() {
       console.error('Failed to save orders to localStorage', e);
     }
   }, [savedOrders]);
-
-  const handleSelectBusinessFlow = (flow: BusinessFlow) => {
-    if (flow === selectedBusinessFlow) return;
-    const label = getBusinessFlowLabel(flow);
-    setSelectedBusinessFlow(flow);
-    setShippingInfo({ ...INITIAL_SHIPPING_INFO, businessFlow: flow });
-    setTrackingCode(generateTrackingCode());
-    setMessages([{
-      id: `msg-flow-${Date.now()}`,
-      sender: 'bot',
-      text: `Mình đã chọn luồng ${label}. Bên em tiếp tục hỗ trợ theo quy trình chat hiện tại. Vui lòng cung cấp thông tin địa chỉ giao nhận để bên em tư vấn.`,
-      timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-    }]);
-  };
 
   // Send message immediately without countdown
   const handleSendMessage = async (userText: string) => {
@@ -218,6 +224,151 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const resetExperimentSession = (mode: ExperimentMode = experimentMode) => {
+    setExperimentMode(mode);
+    setExperimentId(`experiment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+    setExperimentMessages([{
+      id: `experiment-welcome-${mode}-${Date.now()}`,
+      sender: 'bot',
+      text: 'Chào anh/chị, mình có thể hỗ trợ gì cho anh/chị hôm nay?',
+      timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+    }]);
+    setIsOpsActive(false);
+    setIsOpsWindowOpen(false);
+    setOpsMessages([]);
+    setOpsName('Nguyễn An');
+    setMatchedPartner(null);
+    setIsPassengerMatching(false);
+  };
+
+  const handleExperimentModeChange = (mode: ExperimentMode) => resetExperimentSession(mode);
+
+  const addExperimentBotMessage = (text: string, trace?: Array<{ step: string; status: 'ok' | 'skip' | 'error'; detail?: unknown }>, replyToId?: string) => {
+    const message: ChatMessage = {
+      id: `experiment-bot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      sender: 'bot',
+      text,
+      timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      replyToId,
+      ...(trace ? { aiTrace: {
+        source: 'rule' as const,
+        reason: 'PASSENGER_EXPERIMENT_AGENT',
+        elapsedMs: 0,
+        steps: trace.map((step) => ({ node: step.step, status: step.status, detail: step.detail && typeof step.detail === 'object' ? step.detail as Record<string, unknown> : undefined })),
+      } } : {}),
+    };
+    setExperimentMessages((previous) => [...previous, message]);
+    return message;
+  };
+
+  const activateOpsHandover = (conversation: ChatMessage[], profile?: Record<string, unknown>) => {
+    setIsOpsActive(true);
+    setIsOpsWindowOpen(true);
+    const name = typeof profile?.displayName === 'string' ? profile.displayName : 'Nguyễn An';
+    setOpsName(name);
+    setOpsMessages(conversation);
+  };
+
+  const handleSendExperimentMessage = async (userText: string) => {
+    const userMsg: ChatMessage = {
+      id: `experiment-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      sender: 'user',
+      text: userText,
+      timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+    };
+    const newMessages = [...experimentMessages, userMsg];
+    setExperimentMessages(newMessages);
+
+    if (isOpsActive) {
+      setOpsMessages((previous) => [...previous, userMsg]);
+      return;
+    }
+    setIsExperimentLoading(true);
+
+    try {
+      const passengerMode = experimentMode === 'passenger';
+      const historyPayload = newMessages.map((message) => ({ role: message.sender === 'user' ? 'user' : 'model', content: message.text }));
+      const res = await fetch(passengerMode ? '/api/passenger-transport/agent-turn' : '/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(passengerMode ? {
+          event: 'message',
+          experimentId,
+          message: userText,
+        } : {
+          message: userText,
+          history: historyPayload,
+          currentInfo: INITIAL_SHIPPING_INFO,
+          experimentMode,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+      const data = await res.json();
+      if (passengerMode) {
+        const botMessage = addExperimentBotMessage(data.reply || 'Bot chưa tạo được phản hồi.', data.trace, userMsg.id);
+        if (data.handover) activateOpsHandover([...newMessages, botMessage], data.opsProfile);
+        return;
+      }
+      const botMsg: ChatMessage = {
+        id: `experiment-bot-${Date.now()}`,
+        sender: 'bot',
+        text: data.reply || 'Bot chưa tạo được phản hồi.',
+        timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        aiTrace: data.aiTrace,
+        replyToId: userMsg.id,
+      };
+      setExperimentMessages((previous) => [...previous, botMsg]);
+    } catch (error) {
+      const errorMsg: ChatMessage = {
+        id: `experiment-error-${Date.now()}`,
+        sender: 'bot',
+        text: `Không thể kết nối chatbot thử nghiệm. ${error instanceof Error ? error.message : ''}`.trim(),
+        timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        replyToId: userMsg.id,
+        aiTrace: {
+          source: 'error', reason: 'EXPERIMENT_CHAT_REQUEST_FAILED', elapsedMs: 0,
+          steps: [{ node: 'web_request', status: 'error', reason: 'EXPERIMENT_CHAT_REQUEST_FAILED' }],
+        },
+      };
+      setExperimentMessages((previous) => [...previous, errorMsg]);
+    } finally {
+      setIsExperimentLoading(false);
+    }
+  };
+
+  const handlePassengerBookingReady = async (flow: 'ride' | 'rental', booking: Record<string, unknown>) => {
+    if (isOpsActive) return;
+    setIsPassengerMatching(true);
+    setMatchedPartner(null);
+    try {
+      const res = await fetch('/api/passenger-transport/agent-turn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: 'booking_ready', experimentId, flow, booking }),
+      });
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+      const data = await res.json();
+      if (data.partner) setMatchedPartner({ ...data.partner, flow });
+      const botMessage = addExperimentBotMessage(data.reply || 'Đã xử lý booking thử nghiệm.', data.trace);
+      if (data.handover) activateOpsHandover([...experimentMessages, botMessage], data.opsProfile);
+    } catch (error) {
+      addExperimentBotMessage(`Không thể gọi API ghép đối tác thử nghiệm: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsPassengerMatching(false);
+    }
+  };
+
+  const handleOpsReply = (text: string) => {
+    const reply: ChatMessage = {
+      id: `ops-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      sender: 'agent',
+      text,
+      timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+    };
+    setOpsMessages((previous) => [...previous, reply]);
+    setExperimentMessages((previous) => [...previous, reply]);
   };
 
   const handleUpdateShippingInfo = (updated: ShippingInfo) => {
@@ -338,22 +489,54 @@ export default function App() {
       {/* Main App Workspace */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-5 lg:p-6 print:hidden">
         {/* Core 2-Column Responsive Workspace */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 h-[calc(100vh-6.5rem)] min-h-[600px]">
+        <div className={`grid grid-cols-1 ${isExperimentMode ? 'lg:grid-cols-2' : 'lg:grid-cols-12'} gap-5 h-[calc(100vh-6.5rem)] min-h-[600px]`}>
           {/* Left Column: AI Interactive Chat (7 cols on lg) */}
-          <div className="lg:col-span-7 h-full flex flex-col min-h-0">
-            <ChatPanel
-              messages={messages}
-              isLoading={isLoading}
-              onSendMessage={handleSendMessage}
-              shippingInfo={shippingInfo}
-              onSelectQuickReply={handleSendMessage}
-              selectedBusinessFlow={selectedBusinessFlow}
-              onSelectBusinessFlow={handleSelectBusinessFlow}
-            />
+          <div className={`${isExperimentMode ? 'lg:col-span-1' : 'lg:col-span-7'} h-full flex flex-col min-h-0`}>
+            {isExperimentMode ? (
+              <ExperimentChatPanel
+                messages={experimentMessages}
+                isLoading={isExperimentLoading}
+                mode={experimentMode}
+                onModeChange={handleExperimentModeChange}
+                onSendMessage={handleSendExperimentMessage}
+                onBack={() => setIsExperimentMode(false)}
+                onReset={() => resetExperimentSession()}
+                isOpsActive={isOpsActive}
+                onOpenOps={() => setIsOpsWindowOpen(true)}
+              />
+            ) : (
+              <ChatPanel
+                messages={messages}
+                isLoading={isLoading}
+                onSendMessage={handleSendMessage}
+                shippingInfo={shippingInfo}
+                selectedBusinessFlow={selectedBusinessFlow}
+                onOpenExperiment={() => setIsExperimentMode(true)}
+              />
+            )}
           </div>
 
+          {isExperimentMode && <div className="h-full min-h-0">
+            {experimentMode === 'passenger' ? (
+              <PassengerBookingPanel
+                key={experimentId}
+                onBookingReady={handlePassengerBookingReady}
+                isMatching={isPassengerMatching}
+                matchedPartner={matchedPartner}
+              />
+            ) : (
+              <section className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
+                <div className="max-w-sm">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 text-violet-700">{experimentMode === 'default' ? '?' : experimentMode === 'cargo' ? 'H' : 'T'}</div>
+                  <h2 className="mt-4 text-base font-bold text-slate-900">Bảng thông tin thử nghiệm</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-500">Chọn chế độ <strong>Chuyển người</strong> để mở bảng booking Ride/Rental. Bảng thông tin riêng cho chế độ này sẽ được thiết kế khi triển khai luồng tương ứng.</p>
+                </div>
+              </section>
+            )}
+          </div>}
+
           {/* Right Column: Live Companion Waybill (5 cols on lg) */}
-          <div className="lg:col-span-5 h-full flex flex-col min-h-0">
+          {!isExperimentMode && <div className="lg:col-span-5 h-full flex flex-col min-h-0">
             <WaybillCard
               shippingInfo={shippingInfo}
               onUpdateInfo={handleUpdateShippingInfo}
@@ -361,9 +544,16 @@ export default function App() {
               trackingCode={trackingCode}
               routingConfig={routingConfig}
             />
-          </div>
+          </div>}
         </div>
       </main>
+
+      {isExperimentMode && isOpsActive && isOpsWindowOpen && <OpsChatWindow
+        opsName={opsName}
+        messages={opsMessages}
+        onSend={handleOpsReply}
+        onClose={() => setIsOpsWindowOpen(false)}
+      />}
 
       {/* Modals */}
       <SamplePromptsModal

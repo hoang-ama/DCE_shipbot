@@ -1,0 +1,15 @@
+{
+  "id": "RENTAL-001",
+  "serviceType": "rental",
+  "firstName": "Hải",
+  "lastName": "Nguyễn",
+  "displayName": "Nguyễn Hải",
+  "vehicle": { "make": "Ford", "model": "Tourneo", "year": 2022, "category": "MPV", "seatCapacity": 7 },
+  "maxPassengers": 6,
+  "driverOptions": ["with_driver"],
+  "serviceAreas": ["Hà Nội", "Ninh Bình", "Hạ Long"],
+  "capabilities": ["hourly_rental", "multi_stop", "day_trip", "overnight"],
+  "availability": "daily",
+  "contact": "MOCK-RENTAL-001",
+  "notes": "Đối tác mẫu; thuê theo giờ/ngày, có tài xế."
+}

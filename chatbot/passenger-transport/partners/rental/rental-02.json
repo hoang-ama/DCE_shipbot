@@ -1,0 +1,15 @@
+{
+  "id": "RENTAL-002",
+  "serviceType": "rental",
+  "firstName": "Mai",
+  "lastName": "Đặng",
+  "displayName": "Đặng Mai",
+  "vehicle": { "make": "Toyota", "model": "Fortuner", "year": 2021, "category": "SUV", "seatCapacity": 7 },
+  "maxPassengers": 6,
+  "driverOptions": ["with_driver", "self_drive"],
+  "serviceAreas": ["TP. Hồ Chí Minh", "Vũng Tàu", "Đồng Nai"],
+  "capabilities": ["multi_stop", "day_trip", "luggage", "self_drive"],
+  "availability": "advance_booking",
+  "contact": "MOCK-RENTAL-002",
+  "notes": "Đối tác mẫu; nhận lịch trình nhiều điểm và tự lái theo điều kiện thuê."
+}

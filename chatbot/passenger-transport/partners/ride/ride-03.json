@@ -1,0 +1,14 @@
+{
+  "id": "RIDE-003",
+  "serviceType": "ride",
+  "firstName": "Quốc",
+  "lastName": "Phạm",
+  "displayName": "Phạm Quốc",
+  "vehicle": { "make": "VinFast", "model": "VF 8", "year": 2024, "category": "Electric SUV", "seatCapacity": 5 },
+  "maxPassengers": 4,
+  "serviceAreas": ["Hà Nội", "Quảng Ninh", "Hải Phòng"],
+  "capabilities": ["one_way", "scheduled_pickup", "intercity"],
+  "availability": "advance_booking",
+  "contact": "MOCK-RIDE-003",
+  "notes": "Đối tác mẫu; xe điện, nhận chuyến liên tỉnh đặt trước."
+}

@@ -7,12 +7,12 @@ import {
   MicOff,
   Volume2,
   Workflow,
+  FlaskConical,
   Copy,
   Check,
   X,
 } from 'lucide-react';
 import { ChatMessage, ShippingInfo, AITraceStep, BusinessFlow } from '../types';
-import { BUSINESS_FLOWS, getBusinessFlowLabel } from '../utils/businessFlows';
 import { completedTraceTurns, formatTraceTurn, formatRecentTraceTurns, copyTraceText, MAX_COPIED_TURNS } from '../utils/traceCopy';
 
 const NODE_NAMES: Record<string, string> = {
@@ -31,9 +31,8 @@ interface ChatPanelProps {
   isLoading: boolean;
   onSendMessage: (text: string) => void;
   shippingInfo: ShippingInfo;
-  onSelectQuickReply: (text: string) => void;
   selectedBusinessFlow: BusinessFlow | null;
-  onSelectBusinessFlow: (flow: BusinessFlow) => void;
+  onOpenExperiment: () => void;
   countdown?: number | null;
   onFlushNow?: () => void;
 }
@@ -43,15 +42,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   isLoading,
   onSendMessage,
   shippingInfo,
-  onSelectQuickReply,
   selectedBusinessFlow,
-  onSelectBusinessFlow,
+  onOpenExperiment,
   countdown = null,
   onFlushNow,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
-  const [isBusinessFlowOpen, setIsBusinessFlowOpen] = useState(false);
   const [isTraceOpen, setIsTraceOpen] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<{ key: string; status: 'ok' | 'error'; message: string } | null>(null);
   const traceDialogRef = useRef<HTMLDialogElement>(null);
@@ -199,23 +196,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         </div>
       </div>
 
-      {/* Business flow selector */}
+      {/* Open isolated experiment workspace */}
       <div className="relative z-10 border-b border-slate-200 bg-white px-4 py-2.5">
-        <button type="button" onClick={() => setIsBusinessFlowOpen(open => !open)} disabled={isLoading}
-          aria-expanded={isBusinessFlowOpen} aria-controls="business-flow-options"
-          className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-colors disabled:cursor-wait disabled:opacity-60 ${selectedBusinessFlow ? 'border-blue-200 bg-blue-50 hover:bg-blue-100' : 'border-amber-200 bg-amber-50 hover:bg-amber-100'}`}>
-          <span><span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Luồng nghiệp vụ</span>
-            <span className="text-sm font-bold text-slate-800">{selectedBusinessFlow ? getBusinessFlowLabel(selectedBusinessFlow) : 'Chọn một trong 3 luồng để bắt đầu'}</span></span>
-          <span className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 shadow-xs">{isBusinessFlowOpen ? 'Đóng' : selectedBusinessFlow ? 'Đổi luồng' : 'Chọn luồng'}</span>
+        <button type="button" onClick={onOpenExperiment} disabled={isLoading}
+          className="flex w-full items-center justify-between gap-3 rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2.5 text-left transition-colors hover:bg-violet-100 disabled:cursor-wait disabled:opacity-60">
+          <span><span className="block text-[10px] font-semibold uppercase tracking-wide text-violet-700">Không gian riêng</span>
+            <span className="text-sm font-bold text-slate-800">Mở chatbot thử nghiệm</span></span>
+          <span className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 shadow-xs"><FlaskConical className="h-4 w-4" />Thử nghiệm</span>
         </button>
-        {isBusinessFlowOpen && <div id="business-flow-options" className="absolute left-3 right-3 top-full mt-1 grid gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-xl sm:grid-cols-3" role="group" aria-label="Chọn luồng nghiệp vụ">
-          {BUSINESS_FLOWS.map(flow => <button key={flow.id} type="button" disabled={isLoading} onClick={() => { onSelectBusinessFlow(flow.id); setIsBusinessFlowOpen(false); }}
-            className={`rounded-xl border p-3 text-left transition-colors ${selectedBusinessFlow === flow.id ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-200' : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'}`}>
-            <span className="flex items-center justify-between gap-2 text-sm font-bold text-slate-800">{flow.label}{selectedBusinessFlow === flow.id && <Check className="h-4 w-4 text-blue-600" />}</span>
-            <span className="mt-2 block space-y-1 text-[11px] leading-relaxed text-slate-500">{flow.subServices.map(service => <span key={service} className="block">• {service}</span>)}</span>
-            <span className="mt-2 block text-[10px] text-slate-400">Hiện dùng cùng quy trình chat</span>
-          </button>)}
-        </div>}
       </div>
 
       {/* Messages Feed */}

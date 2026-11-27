@@ -59,7 +59,7 @@ export interface AITrace {
 
 export interface ChatMessage {
   id: string;
-  sender: 'user' | 'bot' | 'system';
+  sender: 'user' | 'bot' | 'agent' | 'system';
   text: string;
   timestamp: string;
   extractedSnippet?: string;

@@ -21,6 +21,7 @@ export interface RentalBooking {
   flow: 'rental';
   customer: CustomerContact;
   pickupAddress: string;
+  destinationAddress: string;
   itinerary: string[];
   startsAt: string;
   endsAt: string;

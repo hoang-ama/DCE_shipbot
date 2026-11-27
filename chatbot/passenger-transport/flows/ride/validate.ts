@@ -8,6 +8,7 @@ export function validateRideBooking(value: RideBooking): ValidationResult<RideBo
       if (!current || typeof current !== 'object') return undefined;
       return (current as Record<string, unknown>)[key];
     }, value);
+    if (field.key === 'passengerCount') return !(Number(fieldValue) > 0);
     return fieldValue === undefined || fieldValue === null || fieldValue === '';
   }).map((field) => field.key);
 

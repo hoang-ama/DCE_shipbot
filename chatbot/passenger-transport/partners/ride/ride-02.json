@@ -1,0 +1,14 @@
+{
+  "id": "RIDE-002",
+  "serviceType": "ride",
+  "firstName": "Lan",
+  "lastName": "Trần",
+  "displayName": "Trần Lan",
+  "vehicle": { "make": "Kia", "model": "Carnival", "year": 2023, "category": "MPV", "seatCapacity": 7 },
+  "maxPassengers": 6,
+  "serviceAreas": ["Hà Nội", "Hưng Yên", "Hải Dương"],
+  "capabilities": ["one_way", "round_trip", "family_luggage"],
+  "availability": "daily",
+  "contact": "MOCK-RIDE-002",
+  "notes": "Đối tác mẫu; nhận nhóm gia đình và hành lý lớn."
+}

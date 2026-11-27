@@ -1,0 +1,10 @@
+{
+  "id": "OPS-001",
+  "firstName": "An",
+  "lastName": "Nguyễn",
+  "displayName": "Nguyễn An",
+  "role": "Điều phối viên thử nghiệm",
+  "team": "Passenger Transport Operations",
+  "contact": "MOCK-OPS-001",
+  "isMock": true
+}
