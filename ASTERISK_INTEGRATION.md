@@ -1,17 +1,17 @@
 # HƯỚNG DẪN CẤU HÌNH TỔNG ĐÀI ASTERISK VOIP $\rightarrow$ ZALO OA SHIPBOT
 
-Tài liệu này cung cấp cấu hình Dialplan mẫu cho tổng đài **Asterisk / FreePBX** để thực hiện kịch bản:
+Tài liệu này cung cấp cấu hình Dialplan mẫu cho tổng đài **Asterisk / FreePBX** và mô tả luồng xử lý tại [`src/modules/asterisk/routes.ts`](src/modules/asterisk/routes.ts):
 1. Khi khách hàng gọi vào Hotline (`19006022` / `0901778008`), tổng đài tự động nhấc máy.
 2. Phát file âm thanh lời chào thu sẵn báo rằng **Đi Chung Express sẽ nhắn tin ngay qua Zalo của số điện thoại khách vừa gọi để tư vấn và lên đơn**.
-3. Tự động gọi Webhook sang ShipBot (`https://ai.dichung.vn/api/asterisk/incoming-call`) truyền kèm `CallerID` (SĐT khách gọi).
+3. Tự động gọi Webhook sang ShipBot (`https://ai.dichung.vn/api/asterisk/incoming-call`) truyền kèm `CallerID` (`callerPhone`) và `uniqueId`.
 4. Tự động cúp máy (`Hangup()`).
-5. ShipBot tự động gửi tin nhắn chào từ **Zalo OA** tới SĐT đó và khởi động lại luồng thu thập thông tin đơn hàng.
+5. ShipBot tự động tra cứu / khởi tạo **phiên chat 24h cố định (`CHAT-DDMM-XXXX`)** với `subVertical = 'express'`, tôn trọng trạng thái **`humanTakeover`**, rồi gửi tin nhắn chào qua **Zalo OA** hoặc **Zalo ZNS**.
 
 ---
 
 ## 1. Cấu hình Dialplan Asterisk (`/etc/asterisk/extensions_custom.conf`)
 
-Thêm đoạn context sau vào file `/etc/asterisk/extensions_custom.conf` (hoặc `extensions.conf`) và gán Inbound Route của Hotline trỏ về `from-dce-shipbot-ivr,s,1`:
+Thêm đoạn context sau vào `/etc/asterisk/extensions_custom.conf` (hoặc `extensions.conf`) và gán Inbound Route của Hotline trỏ về `from-dce-shipbot-ivr,s,1`:
 
 ```ini
 [from-dce-shipbot-ivr]
@@ -28,27 +28,31 @@ exten => s,1,NoOp(=== DCE ShipBot: Nhan cuoc goi tu ${CALLERID(num)} ===)
 ```
 
 Sau khi lưu, nạp lại dialplan trên Asterisk CLI:
+
 ```bash
 asterisk -rx "dialplan reload"
 ```
 
-> **Lưu ý bảo mật (Tùy chọn):** Nếu bạn cấu hình biến môi trường `ASTERISK_WEBHOOK_SECRET` trên VPS ShipBot, hãy thêm header `-H "x-api-key: <SECRET_CUA_BAN>"` vào lệnh `curl` ở trên.
+> **Lưu ý bảo mật (Tùy chọn):** Nếu cấu hình biến môi trường `ASTERISK_WEBHOOK_SECRET` trên VPS ShipBot, hãy thêm header `-H "x-api-key: <SECRET_CUA_BAN>"` vào lệnh `curl` ở trên.
 
 ---
 
-## 2. Cấu hình Zalo ZNS (Dành cho khách mới chưa từng nhắn Zalo OA)
+## 2. Cơ chế Xử lý Trong ShipBot Backend (`src/modules/asterisk/`)
 
-Theo chính sách của Zalo, **Zalo OA CS API** chỉ nhắn được cho người đã từng quan tâm/tương tác với OA.
-- Nếu SĐT gọi đến **đã từng tương tác OA**: ShipBot tự tra `user_id` trong `crm_customers` và gửi thẳng tin nhắn chào qua Zalo OA CS API ngay lập tức.
-- Nếu SĐT gọi đến **là khách mới hoàn toàn**:
-  1. Đăng ký 01 **ZNS Template** trên Zalo Cloud Account với nội dung chào hỏi và 01 nút CTA **"Nhắn tin ngay"** trỏ về Zalo OA của DC Express.
-  2. Điền **Template ID** vào phần cấu hình **Tổng đài Asterisk & Zalo ZNS** ngay trong mục `Zalo OA` trên Web UI của ShipBot (hoặc biến `ZALO_ZNS_TEMPLATE_ID`).
+1. **Chống trùng lặp & Chuẩn hóa SĐT**: Chuẩn hóa `callerPhone` (`09...` / `849...`), bỏ qua webhook lặp lại trong vòng 5 phút và lưu nhật ký vào bảng `asterisk_call_logs`.
+2. **Tích hợp Phiên chat 24h cố định & Handover**:
+   - Với khách **đã từng tương tác OA** (`crm_customers` khớp SĐT): hệ thống gọi `ensureActiveChatSession(matchedUserId, { initialInfo: sessionInfo })` để mở hoặc tiếp nối phiên 24h (`CHAT-DDMM-XXXX`) mặc định `subVertical: 'express'`.
+   - **Tôn trọng Human Handover**: Nếu phiên 24h hiện tại đang ở trạng thái `humanTakeover = true` (Ops đang trực tiếp tư vấn cho khách), ShipBot chỉ ghi nhận cuộc gọi vào CRM theo `sessionId` và **không tự ý gửi tin bot** chen ngang.
+   - Nếu AI đang bật, hệ thống gửi lời chào tiếp nhận qua **Zalo OA CS API** và chờ khách phản hồi tiếp.
+3. **Khách mới hoàn toàn (chưa từng nhắn Zalo OA)**:
+   - Theo chính sách Zalo, **Zalo OA CS API** không gửi được chủ động cho người chưa tương tác.
+   - ShipBot sẽ dùng **ZNS Template** (cấu hình Template ID ngay trong mục `Tổng đài Asterisk & Zalo ZNS` trên Web UI hoặc `/api/config/asterisk` / `ZALO_ZNS_TEMPLATE_ID`) để gửi tin chào kèm nút **"Nhắn tin ngay"**, hoặc chuyển cảnh báo tới **DCE Ops** kèm link `https://zalo.me/<SĐT>`.
 
 ---
 
 ## 3. Kiểm thử nhanh (Test Webhook bằng tay)
 
-Bạn có thể test nhanh bằng lệnh `curl` hoặc nút **Test Cuộc Gọi** trên Web UI:
+Endpoint `POST /api/asterisk/incoming-call` luôn mở cho tổng đài gọi (nếu không đặt `ASTERISK_WEBHOOK_SECRET`); trong khi `GET /api/asterisk/calls` là endpoint quản trị (yêu cầu passcode nếu VPS có đặt `ADMIN_PASSCODE`):
 
 ```bash
 curl -X POST https://ai.dichung.vn/api/asterisk/incoming-call \

@@ -1,12 +1,12 @@
-# RAG PRICING ENGINE - QUY TẮC TÍNH CƯỚC & BẢNG GIÁ DC EXPRESS
+# RAG PRICING ENGINE — QUY TẮC TÍNH CƯỚC, BẢNG GIÁ & MARGIN +30%
 
-Tài liệu đặc tả toàn bộ công thức tính cước vận chuyển, quy đổi thể tích hàng hóa, chính sách biên lợi nhuận (+30% Margin) và cơ sở dữ liệu bảng giá cho hệ thống **Đi Chung Express ShipBot**.
+Tài liệu đặc tả công thức tính cước vận chuyển, quy đổi thể tích hàng hóa, chính sách biên lợi nhuận (`+30% Margin`) áp dụng cho cả **Bảng giá chuẩn** lẫn **Báo giá ngoại lệ từ DCE Ops (Cấp 1) / CSĐT (Cấp 2)** trong hệ thống **Đi Chung Express ShipBot**.
 
 ---
 
 ## 1. CÔNG THỨC QUY ĐỔI KHỐI LƯỢNG THỂ TÍCH (VOLUMETRIC WEIGHT)
 
-Trong ngành vận tải hàng hóa (Logistics), các kiện hàng cồng kềnh chiếm nhiều diện tích khoang xe hoặc khoang máy bay nhưng có khối lượng nhẹ sẽ được tính cước theo **Trọng lượng tính cước (Chargeable Weight)**:
+Các kiện hàng cồng kềnh chiếm diện tích khoang xe hoặc khoang máy bay nhưng khối lượng thực tế nhẹ được tính theo **Trọng lượng tính cước (Chargeable Weight)**:
 
 $$\text{Trọng lượng tính cước (kg)} = \max(\text{Trọng lượng thực tế (kg)}, \text{Trọng lượng quy đổi (kg)})$$
 
@@ -20,33 +20,31 @@ $$\text{Trọng lượng quy đổi (kg)} = \frac{\text{Chiều dài (cm)} \time
 
 $$\text{Trọng lượng quy đổi (kg)} = \frac{\text{Chiều dài (cm)} \times \text{Chiều rộng (cm)} \times \text{Chiều cao (cm)}}{5000}$$
 
-*Quy đổi theo thể tích mét khối ($m^3$)*: $1 m^3 \approx 250 \text{ kg}$.
+*Quy đổi theo thể tích mét khối ($m^3$)*: $1\text{ m}^3 \approx 250\text{ kg}$.
 
 ---
 
 ## 2. CÔNG THỨC BÁO GIÁ & CHÍNH SÁCH BIÊN LỢI NHUẬN (+30%)
 
-### A. Công thức tính giá chuẩn cho Khách hàng
-$$\text{Giá báo Khách hàng} = \text{Giá gốc (Chi phí đối tác/xe)} + 30\% \text{ (Biên lợi nhuận Đi Chung)}$$
+### A. Công thức áp dụng chung cho Cước Chuẩn & Báo Giá Đối Tác (`DCE Ops` Cấp 1 / `CSĐT` Cấp 2)
+Dù đơn được tính tự động từ bảng giá hay nhận báo giá gốc trực tiếp qua Zalo từ **DCE Ops (Cấp 1)** / **CSĐT (Cấp 2)**:
 
-$$\text{Giá báo Khách hàng} = \text{Giá gốc} \times 1.30$$
+$$\text{Giá báo Khách hàng} = \text{Giá gốc đối tác} + 30\% = \text{round}(\text{Giá gốc} \times 1.30)$$
 
-*Ví dụ thực tế*:
-- Tuyến Hà Nội đi Quảng Ninh (kiện 10kg đường bộ): Giá gốc = 91.000 VNĐ.
-  $$\text{Giá báo Khách} = 91.000 \times 1.3 = 118.300 \text{ VNĐ} \approx 118.000 \text{ VNĐ}$$
-- Tuyến Hà Nội đi Ninh Bình (kiện tượng đồng 30kg đường bộ): Giá gốc = 250.000 VNĐ.
-  $$\text{Giá báo Khách} = 250.000 \times 1.3 = 325.000 \text{ VNĐ}$$
+- Khi đối tác nhắn báo giá gốc qua Zalo (hỗ trợ viết tắt trong [`dispatchAgent.ts`](src/chatbot/agents/dispatchAgent.ts) và [`mediaAgent.ts`](src/chatbot/agents/mediaAgent.ts)):
+  - `"1tr2"` $\rightarrow$ Giá gốc `1.200.000 VNĐ` $\rightarrow$ **Giá báo Khách (`+30%`): `1.560.000 VNĐ`**.
+  - `"1tr"` $\rightarrow$ Giá gốc `1.000.000 VNĐ` $\rightarrow$ **Giá báo Khách (`+30%`): `1.300.000 VNĐ`**.
+  - Tuyến Hà Nội $\rightarrow$ Ninh Bình giá gốc `250.000 VNĐ` $\rightarrow$ **Giá báo Khách: `325.000 VNĐ`**.
+- Cả `base_cost_vnd` (giá gốc) và `customer_quote_vnd` (giá +30%) đều được lưu vào bảng `shipping_orders` và hiển thị rõ trong UI **Điều phối Live** ([`DispatchMonitorModal.tsx`](src/frontend/components/DispatchMonitorModal.tsx)) cũng như cổng nhập giá `/quote/:trackingCode` ([`quotes.ts`](src/modules/pricing/quotes.ts)).
 
-### B. Chính sách Thương Lượng & Chiết Khấu Tự Động
-- **Lần 1 (Khách chê đắt hoặc lưỡng lự)**: Bot tự động áp dụng mã ưu đãi/chiết khấu 10% trên giá báo:
-  $$\text{Giá đàm phán lần 2} = \text{Giá báo lần 1} \times 0.90$$
-  *Ví dụ*: $325.000 \times 0.90 = 292.500 \text{ VNĐ} \approx 290.000 \text{ VNĐ}$.
-- **Lần 2 (Khách vẫn từ chối hoặc cần đàm phán thêm)**: Bot kích hoạt cờ `human_handover = true`, giữ nguyên thông tin đơn hàng và thông báo:
-  *"Dạ đơn hàng của mình có tính chất đặc thù, em đã chuyển thông tin tới chuyên viên điều phối để hỗ trợ mức giá tốt nhất cho mình ngay đây ạ!"*
+### B. Chính sách Thương Lượng & Chiết Khấu Tự Động (Lần 1: -10%)
+- **Lần 1 (Khách thương lượng / chê đắt)**: Trong [`evaluateNegotiationOffer`](src/chatbot/agents/closingAgent.ts) (và fallback tại `server.ts`), hệ thống kiểm tra mức sàn an toàn (`floorVnd = baseCostVnd * 1.1` hoặc tối đa `-10%` trên giá báo khách), áp dụng 1 lần duy nhất (`negotiation_used = TRUE`):
+  $$\text{Giá ưu đãi} = \text{Giá báo lần 1} \times 0.90 \quad (\ge \text{Giá gốc} \times 1.10)$$
+- **Lần 2 trở đi hoặc đề xuất thấp hơn sàn**: Chuyển tiếp câu hỏi/yêu cầu sang đối tác hoặc gắn cờ hỗ trợ trực tiếp từ chuyên viên điều phối.
 
 ---
 
-## 3. BẢNG CƯỚC CHUẨN LIÊN TỈNH ĐI CHUNG EXPRESS (2024 - 2026)
+## 3. BẢNG CƯỚC CHUẨN LIÊN TỈNH ĐI CHUNG EXPRESS (Cấu hình động trong `standard_price_routes`)
 
 ### A. Tuyến Hà Nội $\leftrightarrow$ Quảng Ninh (Hạ Long, Cẩm Phả, Uông Bí, Đông Mai...)
 - **Thời gian cam kết**: 4 - 6 giờ (Giao nhận trong ngày).
@@ -99,57 +97,15 @@ $$\text{Giá báo Khách hàng} = \text{Giá gốc} \times 1.30$$
 
 ---
 
-## 5. THIẾT KẾ MODULE TYPESCRIPT (`src/utils/pricingEngine.ts`)
+## 5. VỊ TRÍ TRIỂN KHAI TRONG MÃ NGUỒN HIỆN HÀNH
 
-Mẫu cấu trúc module TypeScript sẵn sàng triển khai vào hệ thống DCE_shipbot:
+Logic định giá và tính `+30% Margin` được tách gọn vào các module sau (tái sử dụng thống nhất cho Web, Zalo Webhook, Quick Quote Portal và Orchestrator):
 
-```typescript
-export interface PricingRouteInput {
-  senderProvince: string;
-  receiverProvince: string;
-  weightKg: number;
-  lengthCm?: number;
-  widthCm?: number;
-  heightCm?: number;
-  isAirRequired?: boolean;
-  hasNarrowAlley?: boolean;
-  requiresHeavyHandling?: boolean;
-}
-
-export interface ServiceQuote {
-  serviceCode: 'road_economy' | 'air_express' | 'inner_city';
-  serviceName: string;
-  estimatedTransitTime: string;
-  baseCostVnd: number;
-  customerQuoteVnd: number;
-  marginPercent: number;
-  chargeableWeightKg: number;
-}
-
-export interface PricingCalculationResult {
-  routeType: 'inner_city' | 'interprovincial_near' | 'north_south' | 'interprovincial_far';
-  volumetricWeightRoad: number;
-  volumetricWeightAir: number;
-  chargeableWeightKg: number;
-  recommendedServices: ServiceQuote[];
-}
-
-/**
- * Tính toán trọng lượng quy đổi và báo giá cước chuẩn Đi Chung Express (+30% Margin)
- */
-export function calculateDCExpressPrice(input: PricingRouteInput): PricingCalculationResult {
-  const l = input.lengthCm || 0;
-  const w = input.widthCm || 0;
-  const h = input.heightCm || 0;
-
-  const volRoad = (l > 0 && w > 0 && h > 0) ? Math.round((l * w * h) / 5000 * 10) / 10 : 0;
-  const volAir = (l > 0 && w > 0 && h > 0) ? Math.round((l * w * h) / 6000 * 10) / 10 : 0;
-
-  const chargeableWeightRoad = Math.max(input.weightKg, volRoad);
-  const chargeableWeightAir = Math.max(input.weightKg, volAir);
-
-  // Logic nhận diện tuyến đường và tính giá (Đường bộ + Đường bay) ...
-  // Chi tiết cài đặt đầy đủ theo bảng giá ở Mục 3
-}
-```
-
+1. [`src/modules/pricing/engine.ts`](src/modules/pricing/engine.ts) *(đồng bộ UI tại [`src/frontend/utils/pricingEngine.ts`](src/frontend/utils/pricingEngine.ts))*:
+   - Chứa `calculateDCExpressPriceFromShippingInfo(shippingInfo, routes)`, `DEFAULT_STANDARD_ROUTES`, quy đổi thể tích $/5000$ & $/6000$, phụ phí và định dạng tiền tệ `formatVnd`.
+2. [`src/modules/pricing/quotes.ts`](src/modules/pricing/quotes.ts) & [`src/modules/pricing/routes.ts`](src/modules/pricing/routes.ts):
+   - Xử lý cổng nhập giá nhanh `GET /quote/:trackingCode`, `POST /api/orders/:trackingCode/quote`, parser tiền tệ `parseVietnameseMoney`, chuyển trạng thái sang `QUOTED_WAITING_CUSTOMER` và đồng bộ bảng `standard_price_routes`.
+3. [`src/chatbot/agents/dispatchAgent.ts`](src/chatbot/agents/dispatchAgent.ts):
+   - Chứa `parseBaseQuoteAmountVnd`, `applyMargin30Percent` (`Math.round(baseCostVnd * 1.3)`) và `analyzeStaffReply` để xử lý trực tiếp tin nhắn báo giá ngắn từ DCE Ops / CSĐT trên Zalo OA.
+4. [`src/chatbot/agents/closingAgent.ts`](src/chatbot/agents/closingAgent.ts):
+   - Chứa `evaluateNegotiationOffer` (đàm phán tối đa -10% giữ sàn `baseCost * 1.1`) và `buildPaymentLinkMessage` (gửi link VietQR song song khi khách thanh toán lúc gửi hàng).

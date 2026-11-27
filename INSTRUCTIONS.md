@@ -1,152 +1,115 @@
-# DỰ ÁN: ĐI CHUNG EXPRESS SHIPBOT - INSTRUCTIONS FOR CODING AGENT
+# DỰ ÁN: ĐI CHUNG EXPRESS SHIPBOT — INSTRUCTIONS FOR CODING AGENT & DEVELOPERS
 
-> **Tài liệu hướng dẫn bắt buộc dành cho Antigravity AI Coding Agent**.  
-> Tài liệu này mô tả chi tiết Tech Stack, cấu trúc mã nguồn, các quy tắc nghiệp vụ/fine-tuning bắt buộc phải giữ nguyên, và lộ trình các module cần tiếp tục phát triển cho dự án Đi Chung Express ShipBot.
+> **Tài liệu hướng dẫn kỹ thuật dành cho AI Coding Agent và Lập trình viên**.  
+> Quy định rõ Tech Stack, bản đồ mã nguồn thực tế, các quy tắc nghiệp vụ bất biến và lệnh kiểm thử trước khi đẩy code lên GitHub (`main`).
 
 ---
 
-## 1. TECH STACK & MÔI TRƯỜNG HIỆN HÀNH (KHÔNG ĐƯỢC THAY ĐỔI)
+## 1. TECH STACK & MÔI TRƯỜNG VẬN HÀNH
 
-Hệ thống hiện tại đang hoạt động ổn định trên production với các công nghệ sau:
-
-| Thành phần | Công nghệ / Thư viện | Chi tiết cấu hình |
+| Thành phần | Công nghệ / Thư viện | Chi tiết cấu hình hiện hành |
 | :--- | :--- | :--- |
-| **Backend** | **Node.js (v20+) + Express + TypeScript** | File chính: `server.ts`. Chạy HTTP server trên port 3000, hỗ trợ reverse proxy Render (`app.set('trust proxy', 1)`). |
-| **Frontend** | **React 19 + TypeScript + Vite + Tailwind CSS** | Thư mục `src/`. Single Page Application tích hợp đầy đủ tương tác Chat, Phiếu vận đơn, CRM, Zalo Status. |
-| **AI LLM Engine** | **Google Gemini API (`@google/genai`)** | Server-side client. Sử dụng model `gemini-3.8-flash` (hoặc `gemini-2.5-flash`), cấu hình Thinking Level phù hợp cho tác vụ bóc tách địa chính và tư vấn. |
-| **Database** | **PostgreSQL (Render `shipbot-db`)** | Kết nối qua `pg.Pool`. Tự động cấu hình SSL bypass khi chạy trên mạng nội bộ VPC của Render. Gồm 5 bảng: `zalo_auth`, `shipping_orders`, `crm_customers`, `crm_messages`, `zalo_sessions`. |
-| **Kênh tích hợp** | **Zalo Official Account OpenAPI v4** | Endpoint Webhook `/api/zalo/webhook`. Cơ chế 1-Click OAuth hỗ trợ bảo mật **PKCE** (`code_verifier` & `code_challenge`), tự động làm mới chủ động trước hạn ở mốc 18 giờ. |
-| **Dữ liệu địa chính** | **`src/data/vnAdministrative.ts`** | Từ điển 63 tỉnh thành Việt Nam, danh sách quận/huyện, phường/xã, điểm mốc nổi tiếng và giải thuật bóc tách tọa độ Google Maps. |
+| **Backend** | **Node.js v22+ + Express + TypeScript (`tsx`)** | File chính: `server.ts`. Chạy mặc định tại `HOST=0.0.0.0`, `PORT=2700`, triển khai Docker sau Reverse Proxy (`https://ai.dichung.vn`). |
+| **Frontend** | **React 19 + TypeScript + Vite 8 + Tailwind CSS v4** | Thư mục `src/frontend/`. Build đa trang: `index.html` (Web CRM & Ops), `playground.html` (Simulator 3 kênh), `dichung.html`. |
+| **AI & Multi-Agent** | **Google Gemini (`@google/genai`) + Rule Engine** | `gemini-3.8-flash`, `gemini-3.1-flash-lite`, `gemini-3.5-transcribe` kèm rule fallback offline khi thiếu `GEMINI_API_KEY`. |
+| **Database** | **PostgreSQL (`pg` Pool)** | Migration tại `src/database/migrations/001_express.sql`, tự động khôi phục khi boot trong `src/database/bootstrap.ts`. |
+| **Kênh & Điều phối** | **Zalo OA OpenAPI v4 + Asterisk VoIP + VietQR** | PKCE OAuth (`refresh` trước hạn 18h), Phiên 24h cố định, Quote-Reply đa đơn (`order_dispatch_threads`), bảo mật tùy chọn `ADMIN_PASSCODE`. |
 
 ---
 
-## 2. QUY TẮC BẮT BUỘC VỀ DỮ LIỆU & HUẤN LUYỆN (FINE-TUNING RULES)
+## 2. QUY TẮC BẮT BUỘC KHI CHỈNH SỬA CODE
 
-Khi chỉnh sửa mã nguồn hoặc phát triển tính năng mới, **TUYỆT ĐỐI BẢO TOÀN** các quy tắc logic nghiệp vụ sau:
+### A. Quy tắc Kênh Zalo OA vs Web Chat
+1. **Zalo OA mặc định vào thẳng `express`**: Trong [`src/chatbot/services/router.ts`](src/chatbot/services/router.ts), khi truyền `{ channel: 'zalo' }`, tuyệt đối **không trả về `GROUP_MENU`** cả lúc chào đầu lẫn khi khách nhắn `reset` / `tạo đơn mới` / `menu`.
+2. **Web Chat giữ `GROUP_MENU`**: Chỉ kênh `web` (mặc định khi `channel !== 'zalo'`) mới hiển thị menu 3 nhóm dịch vụ.
 
-### A. Quy tắc Dịch Ngược Địa Chính (Reverse Geocoding)
-1. **Dịch ngược điểm mốc sang Phường/Xã**:
-   - Khi khách hàng nhắn tên tòa nhà, địa danh, khu đô thị (ví dụ: *Keangnam, Landmark 81, Royal City, Times City, Bãi Cháy, KĐT PG An Đồng...*), hệ thống **bắt buộc phải dịch ngược** ra địa chỉ chi tiết có cấp Phường/Xã và Tỉnh/Thành phố.
-   - Khi đã dịch ngược thành công (có Phường/Xã), đánh dấu `hasWardCommune = true` và **tuyệt đối không hỏi lại địa chỉ đó nữa**.
-2. **Xử lý Link Google Maps & Tọa độ**:
-   - Khi khách gửi link `maps.app.goo.gl` hoặc tọa độ GPS (`lat, lng`), hàm `parseGoogleMapsLocation` và Gemini phải dịch sang tên địa chỉ hành chính dạng text. Không bao giờ lưu link thô vào trường `address`.
-3. **Chỉ hỏi lại khi hoàn toàn không có thông tin chi tiết**:
-   - Chỉ khi khách chỉ nói cụt lủn tên tỉnh (*"ở Hà Nội"*, *"gửi vào Sài Gòn"*) hoặc tên quận chung chung (*"Cầu Giấy"*, *"Quận 1"*) mà không có đường/phường, mới hỏi lại địa chỉ chi tiết đến phường/xã.
+### B. Quy tắc Phiên Chat Cố Định 24h & Handover
+1. **Cửa sổ 24h cố định (`CHAT_SESSION_TTL_MS`)**: Mọi tương tác gắn mã phiên `CHAT-DDMM-XXXX` tính từ `sessionStartedAt` (không reset trượt theo từng tin nhắn).
+2. **Zalo ID Alias & Handover**: Luôn ánh xạ hai chiều giữa `user_id_by_app` và `sender.id` / `recipient.id` qua `linkZaloIds` & `getLinkedZaloIds` ([`src/modules/zalo/outbound-tracking.ts`](src/modules/zalo/outbound-tracking.ts)). Khi `humanTakeover = true` trong phiên 24h, AI **phải im lặng** (cả webhook text, idle follow-up 5 phút lẫn Asterisk greeting). Chỉ bật lại AI khi nhận lệnh `#bot`/`#ai` hoặc thao tác bật lại từ CRM Web, hoặc khi hết 24h mở phiên mới.
 
-### B. Quy tắc Thông Tin Hàng Hóa (Đạt 2/3 tiêu chí)
-- Bắt buộc phải thu thập đủ ít nhất **2 trên 3 trường**: (1) Tên loại hàng, (2) Khối lượng kg, (3) Kích thước cm.
-- **Tên hàng hóa (category)**: Phải chuẩn hóa về danh mục chung (*Hoa quả, Tài liệu, Quần áo, Thực phẩm, Hải sản, Đồ gia dụng, Linh kiện điện tử, Mỹ phẩm, Dược phẩm...*). Chi tiết cụ thể của món hàng được lưu vào `specialNotes`.
+### C. Quy tắc Địa Chính, Hàng Hóa & Chống Ghi Đè
+1. **Dịch ngược địa danh**: Điểm mốc, tòa nhà, KĐT, link Google Maps phải dịch ngược tới cấp **Phường/Xã, Quận/Huyện, Tỉnh/Thành phố** (`hasWardCommune = true`) dùng [`src/shared/data/vnAdministrative.ts`](src/shared/data/vnAdministrative.ts) & [`src/chatbot/validation/field-check.ts`](src/chatbot/validation/field-check.ts).
+2. **Thông tin hàng hóa & Thời gian**: Đạt tối thiểu **2/3 tiêu chí** (*Loại hàng, Khối lượng, Kích thước*). Các từ chỉ thời gian (*"trong ngày"*, *"sáng mai"*, *"15h"*) luôn đưa vào `deliveryTime`.
+3. **Chống ghi đè (Anti-Overwrite)**: Bảo toàn các guard trong [`src/chatbot/extraction/express.ts`](src/chatbot/extraction/express.ts) (`isConversationalOrQuestion`, `hasExplicitAddressSignal`, `isNotValidAddress`) để câu hỏi/giục nhanh của khách không bao giờ ghi đè địa chỉ đã có.
 
-### C. Quy tắc Thời Gian Giao Nhận
-- Phân biệt rõ thời gian với địa chỉ: Các cụm từ như *"hỏa tốc trong ngày"*, *"giao nhận hỏa tốc"*, *"trong ngày luôn"*, *"sáng mai"*, *"hẹn 15h"* thuộc trường `deliveryTime`. **Tuyệt đối không gán nhầm vào địa chỉ lấy hay địa chỉ giao**.
-
-### D. Văn Phong & Ngăn Chặn Lặp Từ (Anti-Hallucination & Anti-Fluff)
-- Xưng hô chuẩn người Việt: Xưng *"em"*, gọi *"anh/chị"*.
-- **Loại bỏ câu rập khuôn máy móc**: Sử dụng hàm `cleanResponseText` để cắt bỏ các cụm từ thừa thãi như *"Dạ em đã ghi nhận thông tin"*, *"để bên em hỗ trợ mình ạ"*.
-- **Xác nhận 4 dòng phân tách `\n`**: Khi đủ 4 thông tin critical, bắt buộc xuất câu chốt kèm form 4 dòng rõ ràng:
-  ```text
-  Dạ em đã nhận đủ thông tin đơn hàng, anh/chị xác nhận giúp em để em báo giá cho mình ạ:
-  1) Địa chỉ lấy hàng: ...
-  2) Địa chỉ giao hàng: ...
-  3) Thông tin hàng: ...
-  4) Thời gian giao nhận: ...
-  ```
+### D. Quy tắc Multi-Agent Orchestrator, Margin +30% & Đa Đơn
+1. **Luồng Waterfall 2 cấp (`DCE -> CSĐT`)**: Đơn ngoại lệ chưa có trong bảng giá chuẩn phải gửi **Cấp 1 (`DCE Ops`)** trước (`WAITING_DCE`). Chỉ chuyển **Cấp 2 (`CSĐT`)** khi DCE trả lời từ chối (`REJECT`) hoặc khi `dceOpsUserId` chưa được gắn.
+2. **Cộng `+30% Margin` thống nhất**: Cả DCE (Cấp 1) và CSĐT (Cấp 2) đều nhắn giá gốc (VD `"1tr2"` $\rightarrow$ `1.200.000`). Hệ thống bắt buộc tính `customerQuoteVnd = Math.round(baseCostVnd * 1.3)` (`1.560.000 VNĐ`) trước khi báo khách.
+3. **Khớp đa đơn & VietQR song song**: Gửi tin nhắn cho đối tác phải qua `sendZaloOAReplyWithMeta` để lưu `zaloMsgId` vào `order_dispatch_threads`. Khi khách chọn `"Thanh toán lúc gửi hàng"`, luôn gửi link `/pay/:trackingCode` (vẫn cho COD) **song song** với bước hỏi đối tác SĐT Tài xế.
 
 ---
 
 ## 3. BẢN ĐỒ CẤU TRÚC MÃ NGUỒN (SOURCE CODE MAP)
 
 ```text
-server.ts
-├── Cấu hình Express, Trust Proxy, pg Pool kết nối PostgreSQL shipbot-db
-├── SYSTEM_INSTRUCTION: Prompt chính của Đi Chung Express
-├── vnAdministrative: Hàm chuẩn hóa và từ điển địa chính 63 tỉnh thành
-├── processChatPipeline: Xử lý hội thoại, Fast Evaluator & gọi Gemini API
-├── Zalo OA Controller:
-│   ├── /api/zalo/webhook: Lắng nghe tin nhắn từ Zalo OA
-│   ├── /api/zalo/oauth/login: Tạo URL xác thực OAuth v4 kèm PKCE (code_challenge)
-│   ├── /api/zalo/oauth/callback: Nhận code, đối soát code_verifier, lưu token vào PostgreSQL
-│   ├── /api/zalo/status: Báo cáo trạng thái token và logs kết nối
-│   └── Cron Proactive Token Refresh: Tự động chạy mỗi 30p, gia hạn tại mốc 18 giờ
-├── CRM Controller:
-│   ├── inMemoryCustomers & crm_customers table
-│   ├── inMemoryMessages & crm_messages table
-│   └── /api/crm/*: API danh bạ, lịch sử chat và gửi tin nhắn trực tiếp
-├── Orders Controller:
-│   ├── shipping_orders table
-│   ├── saveShippingOrder: Hàm lưu đơn (đồng bộ Web & Zalo OA)
-│   └── /api/orders: GET, POST, DELETE đơn vận chuyển
-└── /api/db/overview: API trực quan xem số lượng bản ghi và cấu trúc DB
-
-src/
-├── App.tsx: Điều phối trạng thái toàn cục (tin nhắn, phiếu đơn, modals)
-├── types.ts: Định nghĩa ShippingInfo, OrderRecord, CRM types
-├── utils/logistics.ts: Sinh mã VN-LOG, định dạng tóm tắt đơn
-├── data/vnAdministrative.ts: Bộ từ điển địa chính 63 tỉnh thành và geocoding
-└── components/
-    ├── Header.tsx: Thanh công cụ (Zalo badge, CRM, Lịch sử, Tạo mới)
-    ├── ChatPanel.tsx: Giao diện nhắn tin, nhập giọng nói
-    ├── WaybillCard.tsx: Phiếu vận đơn trực quan 4 trường
-    ├── OrderHistoryModal.tsx: Quản lý lịch sử đơn (PostgreSQL sync)
-    ├── ZaloStatusModal.tsx: Bảng điều khiển Zalo OA, 1-Click PKCE button
-    └── CrmModal.tsx: Bảng điều khiển CRM và chat trực tiếp với khách
+server.ts                            # Entrypoint HTTP: /api/chat, /api/zalo/webhook, /api/dispatch, Vite dev & dist/ prod fallback
+├── src/config/
+│   ├── env.ts                       # PORT, HOST (0.0.0.0), ADMIN_PASSCODE, GEMINI_API_KEY, DATABASE_URL, ZALO_*
+│   ├── runtime.ts                   # Cấu hình động Zalo/Chatbot/Supplier/Payment/Asterisk
+│   ├── chatbot-ai.ts & paths.ts
+├── src/shared/
+│   ├── access-guard.ts              # Middleware kiểm tra ADMIN_PASSCODE trên các endpoint quản trị
+│   ├── system-routes.ts             # GET /api/health, GET /api/auth/status, POST /api/auth/verify
+│   ├── service-menu.ts              # GROUP_MENU & GROUP_CHOICES (kênh Web)
+│   ├── types.ts & shipment-format.ts
+│   └── data/vnAdministrative.ts     # Từ điển địa chính 63 tỉnh thành & geocoding
+├── src/database/
+│   ├── connection.ts                # PostgreSQL pg.Pool
+│   ├── migrations/001_express.sql   # Schema đầy đủ (shipping_orders, order_dispatch_threads, crm_*, zalo_*, ...)
+│   ├── bootstrap.ts                 # Khởi tạo bảng & restore state (bỏ qua session >24h)
+│   └── routes.ts                    # /api/db/overview
+├── src/chatbot/
+│   ├── engine.ts & services/        # router.ts (Web GROUP_MENU vs Zalo express), express.ts, ride/rent/truck/tour.ts
+│   ├── extraction/ & validation/    # express.ts, field-check.ts, field-schema.ts, reply.ts
+│   ├── agents/                      # dispatchAgent.ts, intakeAgent.ts, closingAgent.ts, mediaAgent.ts, gemini-structured.ts
+│   └── playground/                  # routes.ts & service.ts cho /api/chatbot/* (ủy quyền tới src/chatbot/agents/)
+├── src/orchestrator/
+│   ├── stateMachine.ts              # 15 OrderWorkflowState, transitions, order_dispatch_threads & đa đơn disambiguation
+│   ├── coordinator.ts               # handlePartnerZaloMessage() & handleCustomerZaloWorkflow()
+│   └── routes.ts                    # GET /api/dispatch/orders & POST /api/dispatch/orders/:trackingCode/action
+├── src/modules/
+│   ├── conversation/ & handover/    # Phiên 24h cố định & Human Handover đồng bộ alias
+│   ├── zalo/                        # OAuth PKCE, Token Refresh 18h, sender.ts (kèm messageId), outbound-tracking.ts
+│   ├── customer/ & booking/         # CRM 24h + Auto-save đơn hàng vào PostgreSQL
+│   ├── pricing/ & supplier/         # engine.ts, quotes.ts (/quote), commands.ts (#ops/#supplier/#baogia), service.ts
+│   └── payment/ & asterisk/         # VietQR (/pay), Webhook ngân hàng, Asterisk VoIP -> Zalo ZNS/24h session
+└── src/frontend/
+    ├── App.tsx, main.tsx, index.css
+    ├── components/                  # Header, ChatPanel, WaybillCard, CrmModal (lọc phiên 24h), DispatchMonitorModal, AdminAuthModal, ZaloStatusModal, OrderHistoryModal
+    ├── playground/                  # Simulator 3 kênh (/playground.html) + StateTracker + MermaidModal
+    └── utils/                       # auth.ts (interceptor x-admin-passcode), logistics.ts, pricingEngine.ts
 ```
 
 ---
 
-## 4. KẾ HOẠCH NÂNG CẤP TIẾP THEO (NEXT MODULES ROADMAP)
+## 4. HẠNG MỤC ĐÃ HOÀN THÀNH & KẾ HOẠCH TIẾP THEO
 
-Agent cần thực hiện các nhiệm vụ tiếp theo theo đúng thứ tự ưu tiên dưới đây:
-
-### Module 1: Tích Hợp Động Cơ RAG Tính Cước (`pricing_engine`)
-- **Mục tiêu**: Sau khi khách hàng xác nhận form 4 dòng, hệ thống tự động tính cước và đưa ra lựa chọn gói dịch vụ (Đường bộ tiết kiệm vs Hỏa tốc đường bay).
-- **Yêu cầu triển khai**:
-  1. Tạo file `src/utils/pricingEngine.ts` và tích hợp vào `server.ts`.
-  2. Triển khai công thức quy đổi thể tích theo `RAG_PRICING_ENGINE.md`:
-     - Đường hàng không: `Dài x Rộng x Cao / 6000`
-     - Đường bộ: `Dài x Rộng x Cao / 5000`
-     - Cước phí: $\text{Giá báo KH} = \text{Giá gốc đối tác} + 30\% \text{ Margin}$.
-  3. Báo giá tự động 2 gói dịch vụ trên giao diện Chat và cập nhật lên `WaybillCard.tsx`.
-  4. Hỗ trợ chính sách thương lượng: Khách chê đắt lần 1 $\rightarrow$ giảm 10%; khách từ chối lần 2 $\rightarrow$ kích hoạt cờ chuyển cho nhân viên tư vấn.
-
-### Module 2: Tự Động Hóa Giai Đoạn 3, 4, 5 (Vận Hành & Chốt Đơn Hoàn Chỉnh)
-- **Mục tiêu**: Triển khai trọn vẹn kịch bản 5 giai đoạn:
-  - Giai đoạn 3: Hỏi thông tin liên lạc 2 đầu (Tên, SĐT), Bên thanh toán (Đầu gửi/Đầu nhận), Hình thức thanh toán (Tiền mặt/Chuyển khoản).
-  - Giai đoạn 4: Hỏi nhanh VAT & Bảo hiểm bổ sung.
-  - Giai đoạn 5: Xuất Phiếu xác nhận đơn hàng (Order Confirmation) hoàn chỉnh và lưu vào PostgreSQL.
-
-### Module 3: Tích Hợp API Bắn Lead Sang DC Hub Portal (`portal.dichung.vn`)
-- **Mục tiêu**: Khi đơn hàng đạt trạng thái `confirmed`, tự động tạo payload JSON chuẩn (theo schema trong `PROJECT_OVERVIEW.md`) và gọi API POST sang cổng điều phối DC Hub Portal.
-- **Yêu cầu triển khai**:
-  - Tạo cấu hình `DCHUB_PORTAL_API_URL` và `DCHUB_PORTAL_TOKEN` trong `.env`.
-  - Có cơ chế retry và ghi log sự kiện vào cơ sở dữ liệu.
-
-### Module 4: Tích Hợp Tổng Đài VoIP Asterisk / Callbot AI
-- **Mục tiêu**: Mở rộng kênh Hotline `19006022` / `0901778008` qua SIP Trunk Asterisk, kết nối STT Whisper và TTS tiếng Việt để tiếp nhận đơn hàng qua giọng nói tự động.
+- **Đã hoàn thành**:
+  - Tách module hoàn chỉnh Server (`src/modules`), AI Sub-Agents (`src/chatbot/agents`), Master Orchestrator (`src/orchestrator`), Database (`src/database`).
+  - Động cơ tính giá chuẩn `RAG Pricing Engine` (`src/modules/pricing/engine.ts`), Portal `/quote/:code`, `/pay/:code`, Webhook VietQR & Asterisk VoIP.
+  - Phiên 24h cố định, Alias Zalo Handover, Waterfall 2 cấp `DCE -> CSĐT` (+30% Margin), Quote-Reply đa đơn, UI Điều phối Live & Khung bảo mật `ADMIN_PASSCODE`.
+- **Tiếp theo (Checklist triển khai)**:
+  1. Liên kết `#ops` (`0934691766`) và `#supplier` (`0906106066`) trên môi trường production & chạy UAT đơn thật.
+  2. Cấu hình tài khoản ngân hàng VietQR thật, Webhook SePay/Casso, Zalo ZNS Template ID & bật `ADMIN_PASSCODE` trong `.env` VPS.
+  3. Mở rộng **Multi-Supplier Routing** theo tuyến/loại xe và kết nối API đồng bộ **DC Hub Portal** (`portal.dichung.vn`) + báo cáo KPI.
 
 ---
 
-## 5. LỆNH THỰC THI CHUẨN (STANDARD COMMANDS)
+## 5. LỆNH KIỂM THỬ & TRIỂN KHAI CHUẨN
 
-Khi làm việc trong môi trường dòng lệnh:
+Mọi chỉnh sửa mã nguồn bắt buộc chạy qua 3 lệnh kiểm tra sau và không có lỗi trước khi đẩy lên `main`:
 
 ```bash
-# 1. Kiểm tra lỗi Typescript toàn diện (không sinh file)
-npx tsc --noEmit
+# 1. Chạy toàn bộ unit & orchestrator tests (chế độ offline, không cần API key / DB)
+npm test
 
-# 2. Build ứng dụng sản xuất (Vite build)
+# 2. Kiểm tra lỗi TypeScript toàn dự án
+npm run lint
+
+# 3. Build bundle production (index.html, playground.html, dichung.html -> dist/)
 npm run build
-
-# 3. Chạy server ở môi trường Local Development
-npm run dev
-
-# 4. Kiểm tra Git status (Lưu ý: Git commands yêu cầu BypassSandbox: true)
-git status
-git add -A && git commit -m "feat: your feature summary"
-git push origin main
 ```
 
----
-
-> **Nguyên tắc cốt lõi**: Luôn giữ vững tính ổn định của hệ thống hiện tại, bảo toàn kết nối PostgreSQL `shipbot-db`, cơ chế OAuth PKCE Zalo OA và các giải thuật địa chính tiếng Việt đã được tinh chỉnh.
-
+Ngoài ra:
+- Chạy local development: `npm run dev` (truy cập `http://localhost:2700` và `http://localhost:2700/playground.html`).
+- Chú ý giữ `.gitignore` luôn bỏ qua `.env`, `.zalo_token.json`, `.zalo_sessions.json`, `dist/` và **không** ignore `src/database/migrations/*.sql`.
