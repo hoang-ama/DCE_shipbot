@@ -23,7 +23,10 @@ export interface CargoInfo {
   declaredValue?: string;
 }
 
+export type BusinessFlow = 'chuyen_nguoi' | 'chuyen_hang' | 'du_lich';
+
 export interface ShippingInfo {
+  businessFlow?: BusinessFlow;
   sender: PersonInfo;
   receiver: PersonInfo;
   cargo: CargoInfo;
@@ -38,6 +41,22 @@ export interface ShippingInfo {
   selectedService?: 'standard' | 'express' | 'economy';
 }
 
+export type AITraceStatus = 'ok' | 'skip' | 'error' | 'info';
+export type AITraceSource = 'gemini' | 'rule' | 'rule_fallback' | 'error';
+export interface AITraceStep {
+  node: string;
+  status: AITraceStatus;
+  reason?: string;
+  elapsedMs?: number;
+  detail?: Record<string, unknown>;
+}
+export interface AITrace {
+  source: AITraceSource;
+  reason: string;
+  elapsedMs: number;
+  steps: AITraceStep[];
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'bot' | 'system';
@@ -45,6 +64,8 @@ export interface ChatMessage {
   timestamp: string;
   extractedSnippet?: string;
   quickReplies?: string[];
+  aiTrace?: AITrace;
+  replyToId?: string;
 }
 
 export interface RoutingConfig {

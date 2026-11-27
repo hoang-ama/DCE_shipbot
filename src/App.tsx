@@ -12,7 +12,8 @@ import { OrderHistoryModal } from './components/OrderHistoryModal';
 import { SuccessOrderModal } from './components/SuccessOrderModal';
 import { ZaloStatusModal } from './components/ZaloStatusModal';
 import { CrmModal } from './components/CrmModal';
-import { ChatMessage, ShippingInfo, OrderRecord, RoutingConfig } from './types';
+import { ChatMessage, ShippingInfo, OrderRecord, RoutingConfig, BusinessFlow } from './types';
+import { getBusinessFlowLabel } from './utils/businessFlows';
 import {
   INITIAL_SHIPPING_INFO,
   evaluateCompleteness,
@@ -26,6 +27,7 @@ const STORAGE_ORDERS_KEY = 'shipbot_saved_orders_v1';
 
 export default function App() {
   const [shippingInfo, setShippingInfo] = useState<ShippingInfo>(INITIAL_SHIPPING_INFO);
+  const [selectedBusinessFlow, setSelectedBusinessFlow] = useState<BusinessFlow | null>(null);
   const [trackingCode, setTrackingCode] = useState<string>(generateTrackingCode());
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [hasApiKey, setHasApiKey] = useState<boolean>(true);
@@ -58,7 +60,7 @@ export default function App() {
     {
       id: 'msg-welcome-1',
       sender: 'bot',
-      text: 'Bên em chuyên về dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Vui lòng cung cấp thông tin địa chỉ giao nhận để bên em tư vấn',
+      text: 'Chào anh/chị! Vui lòng chọn luồng nghiệp vụ ở phía trên khung chat để bắt đầu.',
       timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -115,8 +117,23 @@ export default function App() {
     }
   }, [savedOrders]);
 
+  const handleSelectBusinessFlow = (flow: BusinessFlow) => {
+    if (flow === selectedBusinessFlow) return;
+    const label = getBusinessFlowLabel(flow);
+    setSelectedBusinessFlow(flow);
+    setShippingInfo({ ...INITIAL_SHIPPING_INFO, businessFlow: flow });
+    setTrackingCode(generateTrackingCode());
+    setMessages([{
+      id: `msg-flow-${Date.now()}`,
+      sender: 'bot',
+      text: `Mình đã chọn luồng ${label}. Bên em tiếp tục hỗ trợ theo quy trình chat hiện tại. Vui lòng cung cấp thông tin địa chỉ giao nhận để bên em tư vấn.`,
+      timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+    }]);
+  };
+
   // Send message immediately without countdown
   const handleSendMessage = async (userText: string) => {
+    if (!selectedBusinessFlow) return;
     // If user clicked standard scenario shortcut
     if (userText === 'Dùng kịch bản mẫu đầy đủ') {
       setIsSamplesOpen(true);
@@ -125,7 +142,7 @@ export default function App() {
 
     // Instantly append user's message to the visible chat list
     const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
+      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       sender: 'user',
       text: userText,
       timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
@@ -147,7 +164,7 @@ export default function App() {
         body: JSON.stringify({
           message: userText,
           history: historyPayload,
-          currentInfo: shippingInfo,
+          currentInfo: { ...shippingInfo, businessFlow: selectedBusinessFlow },
         }),
       });
 
@@ -167,6 +184,7 @@ export default function App() {
         setShippingInfo({
           ...data.shippingInfo,
           ...evalResult,
+          businessFlow: selectedBusinessFlow,
           isConfirmed,
         });
       }
@@ -177,6 +195,8 @@ export default function App() {
         text: data.reply || 'Dạ em đã cập nhật thông tin vận chuyển!',
         timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
         quickReplies: data.quickReplies || [],
+        aiTrace: data.aiTrace,
+        replyToId: userMsg.id,
       };
 
       setMessages((prev) => [...prev, botMsg]);
@@ -188,6 +208,11 @@ export default function App() {
         text: 'Dạ em đã lưu nhận thông tin của anh/chị. Anh/chị xem bảng bên phải để kiểm tra các trường đã được điền hoặc bấm "Sửa nhanh" để cập nhật trực tiếp nhé ạ!',
         timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
         quickReplies: [],
+        replyToId: userMsg.id,
+        aiTrace: {
+          source: 'error', reason: 'CHAT_REQUEST_FAILED', elapsedMs: 0,
+          steps: [{ node: 'web_request', status: 'error', reason: 'CHAT_REQUEST_FAILED', detail: { message: error instanceof Error ? error.message : String(error) } }],
+        },
       };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
@@ -200,17 +225,20 @@ export default function App() {
     setShippingInfo({
       ...updated,
       ...evalResult,
+      businessFlow: selectedBusinessFlow || undefined,
     });
   };
 
   const handleReset = () => {
-    setShippingInfo(INITIAL_SHIPPING_INFO);
+    setShippingInfo({ ...INITIAL_SHIPPING_INFO, businessFlow: selectedBusinessFlow || undefined });
     setTrackingCode(generateTrackingCode());
     setMessages([
       {
         id: `msg-reset-${Date.now()}`,
         sender: 'bot',
-        text: 'Bên em chuyên về dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi. Vui lòng cung cấp thông tin địa chỉ giao nhận để bên em tư vấn',
+        text: selectedBusinessFlow
+          ? `Mình đang ở luồng ${getBusinessFlowLabel(selectedBusinessFlow)}. Vui lòng cung cấp thông tin địa chỉ giao nhận để bên em tư vấn.`
+          : 'Chào anh/chị! Vui lòng chọn luồng nghiệp vụ ở phía trên khung chat để bắt đầu.',
         timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
       },
     ]);
@@ -319,6 +347,8 @@ export default function App() {
               onSendMessage={handleSendMessage}
               shippingInfo={shippingInfo}
               onSelectQuickReply={handleSendMessage}
+              selectedBusinessFlow={selectedBusinessFlow}
+              onSelectBusinessFlow={handleSelectBusinessFlow}
             />
           </div>
 

@@ -2582,23 +2582,38 @@ async function expandGoogleMapsShortLinks(text: string): Promise<string> {
 async function processChatPipeline(
   rawMessage: string,
   history: any[] = [],
-  currentInfo: any = {}
+  currentInfo: any = {},
+  options: { includeTrace?: boolean } = {}
 ): Promise<{
   reply: string;
   shippingInfo: any;
   quickReplies: string[];
+  aiTrace?: { source: 'gemini' | 'rule' | 'rule_fallback' | 'error'; reason: string; elapsedMs: number; steps: Array<{ node: string; status: 'ok' | 'skip' | 'error' | 'info'; reason?: string; elapsedMs?: number; detail?: Record<string, unknown> }> };
 }> {
+  const traceEnabled = options.includeTrace === true;
+  const traceStarted = Date.now();
+  const traceSteps: Array<{ node: string; status: 'ok' | 'skip' | 'error' | 'info'; reason?: string; elapsedMs?: number; detail?: Record<string, unknown> }> = [];
+  const addTrace = (node: string, status: 'ok' | 'skip' | 'error' | 'info', reason: string, detail?: Record<string, unknown>, elapsedMs?: number) => {
+    if (traceEnabled) traceSteps.push({ node, status, reason, ...(elapsedMs !== undefined ? { elapsedMs } : {}), ...(detail ? { detail } : {}) });
+  };
+  const finish = (result: { reply: string; shippingInfo: any; quickReplies: string[] }, source: 'gemini' | 'rule' | 'rule_fallback' | 'error', reason: string) => {
+    addTrace('final', 'ok', 'FINAL_RESPONSE', { reply: result.reply, shippingInfo: result.shippingInfo });
+    return traceEnabled ? { ...result, aiTrace: { source, reason, elapsedMs: Date.now() - traceStarted, steps: traceSteps } } : result;
+  };
 
+  addTrace('web_request', 'ok', 'TEXT_RECEIVED', { message: rawMessage, historyLength: history.length, currentInfo });
   if (!rawMessage || typeof rawMessage !== 'string') {
-    return {
+    return finish({
       reply: 'Em chào anh/chị ạ! Bên em chuyên dịch vụ vận chuyển hỏa tốc, giao nhận tận nơi toàn quốc. Anh/chị vui lòng gửi em xin thông tin địa chỉ lấy và giao hàng nhé!',
       shippingInfo: currentInfo || {},
       quickReplies: [],
-    };
+    }, 'rule', 'EMPTY_MESSAGE');
   }
 
-  // Auto-expand any Google Maps short links if present
+  // Auto-expand any Google Maps short links present.
+  const mapStarted = Date.now();
   const message = await expandGoogleMapsShortLinks(rawMessage);
+  addTrace('maps_expand', message !== rawMessage ? 'ok' : 'skip', message !== rawMessage ? 'SHORT_LINK_EXPANDED' : 'NO_SHORT_LINK', { input: rawMessage, output: message }, Date.now() - mapStarted);
 
   // Check if confirmation form was previously sent or order was complete, and user confirms
   const botMsgs = (history || [])
@@ -2626,29 +2641,25 @@ async function processChatPipeline(
       isComplete: true,
       isConfirmed: true,
     };
-    return {
-      reply: ORDER_CONFIRMATION_CLOSING_PHRASE,
-      shippingInfo: confirmedInfo,
-      quickReplies: [],
-    };
+    addTrace('confirmation_rule', 'ok', 'CUSTOMER_CONFIRMED', { isFormPreviouslySent, isConfirm, isCorrection });
+    return finish({ reply: ORDER_CONFIRMATION_CLOSING_PHRASE, shippingInfo: confirmedInfo, quickReplies: [] }, 'rule', 'CUSTOMER_CONFIRMED');
   }
 
   // Khi đơn hàng ĐÃ xác nhận chờ báo giá (isConfirmed === true), nếu khách nhắn hỏi thêm ("Nhanh giúp E vs", "Ng nhận trả phí ship được k ạ")
   // thì TUYỆT ĐỐI KHÔNG cho AI chạy lại extractor ghi đè địa chỉ/hàng hóa hay gửi lại form xác nhận!
   if (currentInfo?.isConfirmed && !isCorrection) {
-    return {
+    addTrace('confirmed_order_guard', 'skip', 'ORDER_ALREADY_CONFIRMED', { isCorrection });
+    return finish({
       reply: 'Dạ thông tin đơn hàng đã được chuyển sang bộ phận điều phối để báo giá, chuyên viên bên em sẽ phản hồi anh/chị ngay nhé ạ.',
-      shippingInfo: {
-        ...(currentInfo || {}),
-        isComplete: true,
-        isConfirmed: true,
-      },
+      shippingInfo: { ...(currentInfo || {}), isComplete: true, isConfirmed: true },
       quickReplies: [],
-    };
+    }, 'rule', 'ORDER_ALREADY_CONFIRMED');
   }
 
   // Pre-extract with fast NLP parser first
+  const extractStarted = Date.now();
   const fastExtracted = smartExtractVietnamese(message, currentInfo);
+  addTrace('fast_extract', 'ok', 'RULE_EXTRACTION', { input: message, output: fastExtracted }, Date.now() - extractStarted);
   console.log('[DEBUG] fastExtracted:', JSON.stringify(fastExtracted));
   if (fastExtracted.sender?.address) {
     const sGeo = reverseGeocodeAddress(fastExtracted.sender.address);
@@ -2668,8 +2679,10 @@ async function processChatPipeline(
       fastExtracted.receiver.hasWardCommune = checkHasWardCommune(fastExtracted.receiver.address);
     }
   }
+  addTrace('address_reverse_geocode', 'ok', 'ADDRESSES_NORMALIZED', { sender: fastExtracted.sender, receiver: fastExtracted.receiver });
 
   if (!ai) {
+    addTrace('gemini', 'skip', 'GEMINI_NO_CLIENT');
     const evalResult = evaluateCompleteness(fastExtracted);
     const chosenKey = chooseNextQuestionKey(evalResult, history, message);
     if (chosenKey) {
@@ -2697,14 +2710,9 @@ async function processChatPipeline(
       }
     }
 
-    return {
-      reply,
-      shippingInfo: {
-        ...cleanShippingInfo,
-        ...evalResult,
-      },
-      quickReplies: [],
-    };
+    addTrace('completeness', 'ok', evalResult.isComplete ? 'FORM_COMPLETE' : 'FIELDS_MISSING', { evalResult, nextQuestion: chosenKey });
+    addTrace('rule_reply', 'ok', 'RULE_REPLY', { reply });
+    return finish({ reply, shippingInfo: { ...cleanShippingInfo, ...evalResult }, quickReplies: [] }, 'rule', 'GEMINI_NO_CLIENT');
   }
 
   try {
@@ -2839,7 +2847,10 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       required: ['reply', 'sender', 'receiver', 'cargo', 'quickReplies'],
     };
 
+    addTrace('gemini_prompt', 'ok', 'PROMPT_BUILT', { prompt: prompt.length > 16000 ? `${prompt.slice(0, 16000)}\n… [prompt truncated]` : prompt });
     let response: any = null;
+    let geminiError: unknown = null;
+    const geminiStarted = Date.now();
     try {
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('timeout')), 7000)
@@ -2860,20 +2871,26 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       });
 
       response = await Promise.race([geminiPromise, timeoutPromise]);
-    } catch {
-      // If Gemini times out (>2.5s) or encounters 503 spike, seamlessly fallback to fastExtracted
+      addTrace('gemini', response?.text ? 'ok' : 'skip', response?.text ? 'GEMINI_JSON_RECEIVED' : 'GEMINI_EMPTY_RESPONSE', { responseText: response?.text || '' }, Date.now() - geminiStarted);
+    } catch (error) {
+      geminiError = error;
+      addTrace('gemini', 'error', error instanceof Error && error.message === 'timeout' ? 'GEMINI_TIMEOUT' : 'GEMINI_REQUEST_ERROR', { error: error instanceof Error ? { name: error.name, message: error.message } : String(error) }, Date.now() - geminiStarted);
+      // Continue with the verified fast extractor when Gemini is unavailable.
     }
 
     let parsed: any = {};
+    let geminiJsonParsed = false;
     if (response && response.text) {
       try {
         parsed = JSON.parse(response.text.trim());
+        geminiJsonParsed = true;
       } catch {
         parsed = fastExtracted;
       }
     } else {
       parsed = fastExtracted;
     }
+    addTrace('gemini_parse', response?.text ? (geminiJsonParsed ? 'ok' : 'error') : 'skip', response?.text ? (geminiJsonParsed ? 'GEMINI_JSON_PARSED' : 'GEMINI_INVALID_JSON') : (geminiError ? 'FAST_EXTRACT_FALLBACK' : 'GEMINI_EMPTY_RESPONSE'), { parsed });
 
     // Merge data seamlessly with currentInfo fallback: Prioritize Gemini semantic extraction over regex
     // Merge data seamlessly with currentInfo protection: NEVER overwrite already-valid fields unless user explicitly corrects!
@@ -3031,8 +3048,10 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       deliveryTime: mergedDeliveryTime,
     };
 
+    addTrace('merge', 'ok', 'FIELDS_MERGED', { sender: mergedSender, receiver: mergedReceiver, cargo: mergedCargo, deliveryTime: mergedDeliveryTime });
     const evalResult = evaluateCompleteness(mergedInfo);
     const chosenKey = chooseNextQuestionKey(evalResult, history, message);
+    addTrace('completeness', 'ok', evalResult.isComplete ? 'FORM_COMPLETE' : 'FIELDS_MISSING', { evalResult, nextQuestion: chosenKey });
     if (chosenKey) {
       evalResult.nextMissingKey = chosenKey;
     }
@@ -3092,15 +3111,10 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       finalReply = cleanResponseText(generateNaturalVietnameseReply(mergedInfo, chosenKey, Math.max(1, repeatCount + 1)));
     }
 
-    return {
-      reply: finalReply,
-      shippingInfo: {
-        ...mergedInfo,
-        ...evalResult,
-      },
-      quickReplies: [],
-    };
+    addTrace('reply_validation', 'ok', 'REPLY_READY', { reply: finalReply, fallbackUsed: finalReply === naturalFallback });
+    return finish({ reply: finalReply, shippingInfo: { ...mergedInfo, ...evalResult }, quickReplies: [] }, geminiJsonParsed ? 'gemini' : 'rule_fallback', geminiJsonParsed ? 'GEMINI_PIPELINE_COMPLETED' : 'FAST_EXTRACT_FALLBACK');
   } catch (error: any) {
+    addTrace('pipeline_error', 'error', 'PIPELINE_ERROR', { error: { name: error?.name, message: error?.message } });
     console.warn('Gemini request failed or timed out, using fast smart extractor:', error?.message);
 
     const { _invalidSenderPhone, _invalidReceiverPhone, ...cleanFastRaw } = fastExtracted;
@@ -3143,14 +3157,8 @@ NHIỆM VỤ CỦA CSKH ĐI CHUNG:
       reply = cleanResponseText(generateNaturalVietnameseReply(cleanFast, chosenKey, Math.max(1, repeatCount + 1)));
     }
 
-    return {
-      reply,
-      shippingInfo: {
-        ...cleanFast,
-        ...evalResult,
-      },
-      quickReplies: [],
-    };
+    addTrace('fallback_reply', 'ok', 'RULE_FALLBACK', { reply, evalResult, nextQuestion: chosenKey });
+    return finish({ reply, shippingInfo: { ...cleanFast, ...evalResult }, quickReplies: [] }, 'rule_fallback', 'GEMINI_PIPELINE_ERROR');
   }
 }
 
@@ -3162,7 +3170,7 @@ app.post('/api/chat', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Message is required' });
   }
 
-  const result = await processChatPipeline(rawMessage, history, currentInfo);
+  const result = await processChatPipeline(rawMessage, history, currentInfo, { includeTrace: true });
   const pricing = calculateDCExpressPriceFromShippingInfo(result.shippingInfo, activeStandardRoutes);
   return res.json({ ...result, pricing });
 });
