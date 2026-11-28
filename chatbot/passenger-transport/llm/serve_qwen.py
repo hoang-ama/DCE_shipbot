@@ -1,0 +1,84 @@
+from __future__ import annotations
+import json
+import os
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock
+
+MODEL_ID = os.environ.get("QWEN_MODEL_ID", "Qwen/Qwen3-0.6B")
+HOST = os.environ.get("QWEN_HOST", "127.0.0.1")
+PORT = int(os.environ.get("QWEN_PORT", "8765"))
+MAX_INPUT_TOKENS = int(os.environ.get("QWEN_MAX_INPUT_TOKENS", "4096"))
+_generation_lock = Lock()
+_tokenizer = None
+_model = None
+_torch = None
+
+def load_model():
+    global _tokenizer, _model, _torch
+    if _model is not None:
+        return
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    _torch = torch
+    _tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    _model = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID,
+        torch_dtype="auto",
+        device_map="auto",
+        low_cpu_mem_usage=True,
+    )
+    _model.eval()
+
+def generate(system: str, user_input: object, max_new_tokens: int) -> tuple[str, int]:
+    load_model()
+    text = json.dumps(user_input, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": text}]
+    try:
+        prompt = _tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+    except TypeError:
+        prompt = _tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    encoded = _tokenizer(prompt, return_tensors="pt", truncation=True, max_length=MAX_INPUT_TOKENS)
+    input_device = _model.get_input_embeddings().weight.device
+    encoded = {key: value.to(input_device) for key, value in encoded.items()}
+    with _generation_lock, _torch.inference_mode():
+        started = time.perf_counter()
+        output = _model.generate(**encoded, max_new_tokens=max(32, min(max_new_tokens, 1200)), do_sample=False, use_cache=True)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+    answer = _tokenizer.decode(output[0][encoded["input_ids"].shape[-1]:], skip_special_tokens=True).strip()
+    return answer, elapsed_ms
+
+class Handler(BaseHTTPRequestHandler):
+    def _send(self, status: int, payload: dict):
+        body = json.dumps(payload, ensure_ascii=False).encode()
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            print("[Qwen worker] Client disconnected before the response was sent.")
+            return False
+        return True
+    def do_GET(self):
+        if self.path == "/health":
+            return self._send(200, {"ok": True, "model": MODEL_ID, "loaded": _model is not None})
+        return self._send(404, {"error": "not_found"})
+    def do_POST(self):
+        if self.path != "/generate":
+            return self._send(404, {"error": "not_found"})
+        try:
+            payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+            answer, elapsed_ms = generate(str(payload.get("system", "")), payload.get("input", {}), int(payload.get("max_new_tokens", 512)))
+        except Exception as exc:
+            print(f"[Qwen worker] Generation failed: {type(exc).__name__}: {exc}")
+            return self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
+        return self._send(200, {"text": answer, "elapsed_ms": elapsed_ms, "model": MODEL_ID})
+    def log_message(self, fmt, *args):
+        print("[Qwen worker] " + fmt % args)
+
+if __name__ == "__main__":
+    print(f"Loading {MODEL_ID} on first request; listening at http://{HOST}:{PORT}")
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

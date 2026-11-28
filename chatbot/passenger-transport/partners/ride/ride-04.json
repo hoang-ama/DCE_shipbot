@@ -1,0 +1,14 @@
+{
+  "id": "RIDE-004",
+  "serviceType": "ride",
+  "firstName": "Hương",
+  "lastName": "Lê",
+  "displayName": "Lê Hương",
+  "vehicle": { "make": "Hyundai", "model": "Solati", "year": 2021, "category": "Minibus", "seatCapacity": 16 },
+  "maxPassengers": 14,
+  "serviceAreas": ["Hà Nội", "Ninh Bình", "Thanh Hóa"],
+  "capabilities": ["group_transfer", "one_way", "scheduled_pickup"],
+  "availability": "daily",
+  "contact": "MOCK-RIDE-004",
+  "notes": "Đối tác mẫu; phục vụ nhóm đông theo chuyến."
+}

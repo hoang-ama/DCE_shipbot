@@ -25,6 +25,8 @@ import { accessGuard, validateConfiguration } from './src/shared/access-guard';
 import { Request, Response } from 'express';
 import { calculateDCExpressPriceFromShippingInfo, formatVnd } from './src/modules/pricing/engine';
 import { Router } from 'express';
+import { passengerTransportRouter } from './chatbot/passenger-transport/routes';
+import { cargoTransportRouter } from './chatbot/cargo-transport/routes';
 import { processChatPipeline } from './src/chatbot/engine';
 import { pricingState } from './src/modules/pricing/state';
 import { inMemoryOrders } from './src/modules/booking/state';
@@ -55,37 +57,115 @@ import { randomUUID } from 'node:crypto';
 
 // Web chat
 const chatRouter = Router();
+const CHAT_JOB_TIMEOUT_MS = 60_000;
+const CHAT_JOB_TTL_MS = 10 * 60_000;
+type ChatJob = {
+  id: string;
+  requestId: string;
+  createdAt: number;
+  status: 'running' | 'done' | 'error';
+  result?: any;
+  error?: string;
+  aiTrace?: any;
+};
+const chatJobs = new Map<string, ChatJob>();
+const chatRequestJobs = new Map<string, string>();
 
-chatRouter.post('/api/chat', async (req: Request, res: Response) => {
-  const { message: rawMessage, history = [], currentInfo = {} } = req.body;
+function pruneChatJobs() {
+  const cutoff = Date.now() - CHAT_JOB_TTL_MS;
+  for (const [id, job] of chatJobs) if (job.createdAt < cutoff) chatJobs.delete(id);
+  for (const [requestId, jobId] of chatRequestJobs) if (!chatJobs.has(jobId)) chatRequestJobs.delete(requestId);
+}
 
-  if (!rawMessage || typeof rawMessage !== 'string') {
-    return res.status(400).json({ error: 'Message is required' });
-  }
+function startChatJob(job: ChatJob, rawMessage: string, history: any[], currentInfo: any, debug: boolean) {
+  const started = Date.now();
+  const timer = setTimeout(() => {
+    if (job.status !== 'running') return;
+    job.status = 'error';
+    job.error = 'CHAT_JOB_TIMEOUT';
+    job.aiTrace = { source: 'error', reason: 'CHAT_JOB_TIMEOUT', elapsedMs: Date.now() - started, steps: [{ node: 'chat_job', status: 'error', reason: 'ONE_MINUTE_DEADLINE', detail: { requestId: job.requestId, timeoutMs: CHAT_JOB_TIMEOUT_MS } }] };
+    console.error(`[CHAT JOB] id=${job.id} timed out elapsed_ms=${Date.now() - started}`);
+  }, CHAT_JOB_TIMEOUT_MS);
+  timer.unref?.();
 
+  void (async () => {
+    let attempt = 0;
+    while (job.status === 'running') {
+      attempt += 1;
+      const result = await processChatPipeline(rawMessage, history, currentInfo, { debug });
+      const qwenFailed = result.aiTrace?.steps?.some((step: any) => /qwen/iu.test(String(step.node || '')) && step.status === 'error');
+      if (qwenFailed) {
+        console.warn(`[CHAT JOB] id=${job.id} Qwen attempt failed; keeping result private and retrying`, { attempt, elapsed_ms: Date.now() - started });
+        if (Date.now() - started + 250 >= CHAT_JOB_TIMEOUT_MS) return;
+        await new Promise(resolve => setTimeout(resolve, 250));
+        continue;
+      }
+      if (job.status !== 'running') return;
+      const pricing = result.shippingInfo.subVertical === 'express'
+        ? calculateDCExpressPriceFromShippingInfo(result.shippingInfo, pricingState.activeStandardRoutes)
+        : null;
+      job.result = { ...result, pricing };
+      job.status = 'done';
+      console.info(`[CHAT JOB] id=${job.id} completed attempts=${attempt} elapsed_ms=${Date.now() - started}`);
+      return;
+    }
+  })()
+    .catch((error) => {
+      if (job.status !== 'running') return;
+      const detail = errorDetail(error);
+      job.status = 'error';
+      job.error = 'CHAT_PROCESSING_ERROR';
+      job.aiTrace = { source: 'error', reason: 'CHAT_PROCESSING_ERROR', elapsedMs: Date.now() - started, steps: [{ node: 'chat_job', status: 'error', reason: 'CHAT_PROCESSING_ERROR', detail: { requestId: job.requestId, error: detail } }] };
+      console.error(`[CHAT JOB] id=${job.id} failed`, detail);
+    })
+    .finally(() => clearTimeout(timer));
+}
+
+// Async endpoint: the browser gets a job ID immediately and polls for its result.
+// Server-side work continues if the browser closes a polling request.
+function enqueueChatJob(req: Request, res: Response) {
+  const { message: rawMessage, history = [], currentInfo = {} } = req.body || {};
+  if (!rawMessage || typeof rawMessage !== 'string') return res.status(400).json({ error: 'Message is required' });
+
+  pruneChatJobs();
   const suppliedId = req.get('X-Chat-Request-Id');
   const requestId = suppliedId && /^[a-zA-Z0-9_-]{1,80}$/.test(suppliedId) ? suppliedId : randomUUID();
+  const existingId = chatRequestJobs.get(requestId);
+  const existing = existingId ? chatJobs.get(existingId) : undefined;
+  if (existing) {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(202).json({ jobId: existing.id, status: existing.status });
+  }
+
+  const job: ChatJob = { id: randomUUID(), requestId, createdAt: Date.now(), status: 'running' };
+  chatJobs.set(job.id, job);
+  chatRequestJobs.set(requestId, job.id);
+  res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Chat-Request-Id', requestId);
-  console.info(`[CHAT HTTP] id=${requestId} started`);
-  const started = Date.now();
-  // Full prompt/output trace is only enabled for same-origin loopback Web Chat.
+
   const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress || '');
   const origin = req.get('origin');
   const expectedOrigins = [`http://localhost:${port}`, `http://127.0.0.1:${port}`, `http://[::1]:${port}`];
   const expectedHosts = expectedOrigins.map(value => new URL(value).host);
   const sameOrigin = origin ? expectedOrigins.includes(origin) : req.get('sec-fetch-site') === 'same-origin';
   const debug = loopback && expectedHosts.includes(req.get('host') || '') && sameOrigin && req.get('sec-fetch-site') !== 'cross-site';
-  res.on('close', () => { if (!res.writableFinished) console.warn(`[CHAT HTTP] id=${requestId} client_closed elapsed_ms=${Date.now()-started}`); });
-  try {
-    const result = await processChatPipeline(rawMessage, history, currentInfo, { debug });
-    const pricing = result.shippingInfo.subVertical === "express" ? calculateDCExpressPriceFromShippingInfo(result.shippingInfo, pricingState.activeStandardRoutes) : null;
-    console.info(`[CHAT HTTP] id=${requestId} completed elapsed_ms=${Date.now()-started} closed=${res.destroyed}`);
-    if (!res.destroyed && !res.writableEnded) return res.json({ ...result, pricing });
-  } catch (error) {
-    const detail = errorDetail(error);
-    console.error(`[CHAT HTTP] id=${requestId} failed`, detail);
-    if (!res.destroyed && !res.headersSent) return res.status(500).json({error:'CHAT_PROCESSING_ERROR',aiTrace:{source:'error',reason:'CHAT_PROCESSING_ERROR',elapsedMs:Date.now()-started,steps:[{node:'web_request',status:'error',reason:'CHAT_PROCESSING_ERROR',...(debug?{detail:{requestId,error:detail}}:{})}]}});
-  }
+  console.info(`[CHAT JOB] id=${job.id} request_id=${requestId} started deadline_ms=${CHAT_JOB_TIMEOUT_MS}`);
+  startChatJob(job, rawMessage, Array.isArray(history) ? history : [], currentInfo, debug);
+  return res.status(202).json({ jobId: job.id, status: 'running', timeoutMs: CHAT_JOB_TIMEOUT_MS });
+}
+
+chatRouter.post('/api/chat', enqueueChatJob);
+chatRouter.post('/api/chat/jobs', enqueueChatJob);
+chatRouter.post('/api/chat', enqueueChatJob);
+
+chatRouter.get('/api/chat/jobs/:jobId', (req: Request, res: Response) => {
+  pruneChatJobs();
+  const job = chatJobs.get(req.params.jobId);
+  res.setHeader('Cache-Control', 'no-store');
+  if (!job) return res.status(404).json({ status: 'error', error: 'CHAT_JOB_NOT_FOUND' });
+  if (job.status === 'running') return res.status(202).json({ jobId: job.id, status: 'running', elapsedMs: Date.now() - job.createdAt });
+  if (job.status === 'error') return res.status(job.error === 'CHAT_JOB_TIMEOUT' ? 504 : 500).json({ jobId: job.id, status: 'error', error: job.error, aiTrace: job.aiTrace });
+  return res.json({ jobId: job.id, status: 'done', result: job.result });
 });
 
 // Order closing and payment orchestration
@@ -153,6 +233,30 @@ export async function handleCustomerClosingWorkflow(userId: string, userText: st
 }
 
 // Zalo events and idle follow-up
+const processedInboundZaloMessages = new Map<string, number>();
+const INBOUND_ZALO_DEDUPE_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_PROCESSED_ZALO_MESSAGES = 20_000;
+
+function isDuplicateInboundZaloMessage(userId: string, rawMessageId: unknown): boolean {
+  const messageId = String(rawMessageId ?? '').trim();
+  if (!messageId) return false;
+
+  const now = Date.now();
+  for (const [key, expiresAt] of processedInboundZaloMessages) {
+    if (expiresAt > now) break;
+    processedInboundZaloMessages.delete(key);
+  }
+
+  const key = `${userId}:${messageId}`;
+  if (processedInboundZaloMessages.has(key)) return true;
+  if (processedInboundZaloMessages.size >= MAX_PROCESSED_ZALO_MESSAGES) {
+    const oldestKey = processedInboundZaloMessages.keys().next().value;
+    if (oldestKey) processedInboundZaloMessages.delete(oldestKey);
+  }
+  processedInboundZaloMessages.set(key, now + INBOUND_ZALO_DEDUPE_TTL_MS);
+  return false;
+}
+
 const messageRouter = Router();
 
 messageRouter.post('/api/zalo/webhook', async (req: Request, res: Response) => {
@@ -161,19 +265,25 @@ messageRouter.post('/api/zalo/webhook', async (req: Request, res: Response) => {
   const userText = message?.text;
   const replyToMsgId = message?.reply_to?.msg_id ? String(message.reply_to.msg_id) : undefined;
 
-  linkZaloIds(user_id_by_app, sender?.id, recipient?.id);
-  const allLinkedIds = getLinkedZaloIds(userId);
-
   // Acknowledge Zalo immediately to prevent retries (timeout is 3s on Zalo)
   res.status(200).json({ error: 0, message: 'Received' });
 
-  // 1. BẮT SỰ KIỆN NHÂN VIÊN CAN THIỆP TRỰC TIẾP TRÊN ZALO OA APP (oa_send_text, oa_send_image, oa_send_file...)
+  // OA intervention events address a customer, so their recipient IDs are safe aliases for that customer.
   if (typeof event_name === 'string' && event_name.startsWith('oa_send_')) {
     await handleOAIntervention(event_name, recipient, user_id_by_app, message);
     return;
   }
 
   if (event_name === 'user_send_text' && userId && userText) {
+    if (isDuplicateInboundZaloMessage(userId, message?.msg_id)) {
+      console.info(`[Zalo OA] Ignored duplicate inbound message ${String(message?.msg_id)}`);
+      return;
+    }
+
+    // For an inbound customer message, recipient.id is the shared OA identity, not another ID for the customer.
+    // Linking it would make every customer appear aliased to a linked Ops/supplier account.
+    linkZaloIds(user_id_by_app, sender?.id);
+    const allLinkedIds = getLinkedZaloIds(userId);
     logZaloEvent('incoming_webhook', `Khách hàng ${userId} nhắn: "${userText}"`, {
       event_name,
       userId,
@@ -197,16 +307,16 @@ messageRouter.post('/api/zalo/webhook', async (req: Request, res: Response) => {
         return;
       }
 
-      // 3. PHIÊN CHAT CỐ ĐỊNH 24H CHO KHÁCH HÀNG ZALO OA (mặc định vào thẳng express)
+      // 3. PHIÊN CHAT CỐ ĐỊNH 24H CHO KHÁCH HÀNG ZALO OA; khách chọn nhóm rồi chọn nhánh con
       const isResetOrder = /^(?:tạo\s*đơn\s*mới|đơn\s*mới|hủy\s*đơn|làm\s*lại|reset)\b/i.test(trimmed);
       const { session } = ensureActiveChatSession(userId, {
         linkedIds: allLinkedIds,
-        initialInfo: { mainVertical: 'chuyen_hang', subVertical: 'express' },
+        initialInfo: {},
       });
 
       if (isResetOrder && !session.humanTakeover) {
         session.history = [];
-        session.currentInfo = { mainVertical: 'chuyen_hang', subVertical: 'express' };
+        session.currentInfo = {};
       }
 
       session.lastActive = Date.now();
@@ -268,10 +378,20 @@ messageRouter.post('/api/zalo/webhook', async (req: Request, res: Response) => {
         return;
       }
 
-      // 6. Tiếp nhận thông tin đơn mới trên Zalo OA (mặc định đi thẳng Express, không bật GROUP_MENU)
+      // 6. Tiếp nhận thông tin đơn mới trên Zalo OA; chọn nhóm và nhánh dịch vụ trước khi thu thập hồ sơ
       const result = await processChatPipeline(userText, session.history, session.currentInfo, {
         channel: 'zalo',
+        debug: true, // CRM's internal AI trace viewer needs sanitized node payloads.
       });
+
+      if (result.suppressed) {
+        session.history.push({ role: 'user', content: userText });
+        session.currentInfo = result.shippingInfo;
+        session.lastActive = Date.now();
+        saveSessionsCache();
+        console.info(`[Zalo OA] Automatic reply suppressed for ${userId}: quote is awaiting manual handling`);
+        return;
+      }
 
       session.history.push({ role: 'user', content: userText });
       session.history.push({ role: 'model', content: result.reply });
@@ -281,7 +401,7 @@ messageRouter.post('/api/zalo/webhook', async (req: Request, res: Response) => {
 
       saveSessionsCache();
       await sendZaloOAReply(userId, result.reply);
-      await recordCrmInteraction(userId, 'bot', result.reply, result.shippingInfo, 'ShipBot AI', session.sessionId);
+      await recordCrmInteraction(userId, 'bot', result.reply, result.shippingInfo, 'ShipBot AI', session.sessionId, result.aiTrace);
     } catch (err: any) {
       logZaloEvent('error', `Lỗi xử lý tin nhắn của user ${userId}: ${err?.message}`);
       console.error('[Zalo OA] Error processing chat reply:', err?.message);
@@ -371,7 +491,7 @@ async function main() {
   app.use(express.json({ limit: '25mb' }));
   for (const router of [systemRouter, chatRouter, playgroundRouter, sandboxRouter,
     zaloRouter, messageRouter, customerRouter, bookingRouter, pricingRouter,
-    supplierRouter, paymentRouter, asteriskRouter, dbRouter]) app.use(router);
+    supplierRouter, paymentRouter, asteriskRouter, dbRouter, passengerTransportRouter, cargoTransportRouter]) app.use(router);
   app.use('/api/dispatch', createDispatchRouter());
   app.use('/api', (_req, res) => { res.status(404).json({ error: 'Unknown API endpoint' }); });
   if (process.env.NODE_ENV !== 'production') {

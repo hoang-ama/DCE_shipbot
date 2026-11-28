@@ -1,0 +1,14 @@
+{
+  "id": "RIDE-006",
+  "serviceType": "ride",
+  "firstName": "Thảo",
+  "lastName": "Vũ",
+  "displayName": "Vũ Thảo",
+  "vehicle": { "make": "Mercedes-Benz", "model": "E-Class", "year": 2023, "category": "Premium Sedan", "seatCapacity": 4 },
+  "maxPassengers": 3,
+  "serviceAreas": ["TP. Hồ Chí Minh", "Bình Dương", "Đồng Nai"],
+  "capabilities": ["one_way", "premium", "airport_transfer", "scheduled_pickup"],
+  "availability": "advance_booking",
+  "contact": "MOCK-RIDE-006",
+  "notes": "Đối tác mẫu; chuyến hạng cao đặt trước."
+}

@@ -2,7 +2,6 @@ import { runtime } from '../config/runtime';
 import { OrderRecordDB } from '../modules/booking/state';
 import { supplierState } from '../modules/supplier/state';
 import { sendZaloOAReplyWithMeta } from '../modules/zalo/sender';
-import { getLinkedZaloIds } from '../modules/zalo/outbound-tracking';
 import { recordCrmInteraction } from '../modules/customer/service';
 import { zaloUserSessions } from '../modules/conversation/state';
 import {
@@ -41,24 +40,31 @@ export interface OrchestrationResult {
   escalatedToCsdt?: boolean;
 }
 
+const ambiguousPromptCooldowns = new Map<string, number>();
+const AMBIGUOUS_PROMPT_COOLDOWN_MS = 2 * 60 * 1000;
+
+function shouldSendAmbiguousPrompt(targetUserId: string, trackingCodes: string[]): boolean {
+  const now = Date.now();
+  for (const [key, expiresAt] of ambiguousPromptCooldowns) {
+    if (expiresAt <= now) ambiguousPromptCooldowns.delete(key);
+  }
+  const signature = trackingCodes.slice().sort().join('|');
+  const key = `${targetUserId}:${signature}`;
+  if ((ambiguousPromptCooldowns.get(key) || 0) > now) return false;
+  ambiguousPromptCooldowns.set(key, now + AMBIGUOUS_PROMPT_COOLDOWN_MS);
+  return true;
+}
+
 export function detectPartnerRoleFromIds(userIds: string[]): PartnerTier | null {
-  const candidateSet = new Set<string>();
-  for (const id of userIds) {
-    for (const linked of getLinkedZaloIds(id)) {
-      candidateSet.add(linked);
-    }
-  }
-  if (supplierState.dceOpsUserId) {
-    for (const linked of getLinkedZaloIds(supplierState.dceOpsUserId)) {
-      if (candidateSet.has(linked)) return 'DCE';
-    }
-  }
-  if (supplierState.defaultSupplierUserId) {
-    for (const linked of getLinkedZaloIds(supplierState.defaultSupplierUserId)) {
-      if (candidateSet.has(linked)) return 'CSDT';
-    }
-  }
-  return null;
+  // Compare only this sender's explicitly linked IDs with the configured partner IDs.
+  // Do not expand the configured IDs through a shared OA alias.
+  const candidateSet = new Set(userIds.map((id) => id.trim()).filter(Boolean));
+  const isDceOps = Boolean(supplierState.dceOpsUserId && candidateSet.has(supplierState.dceOpsUserId.trim()));
+  const isSupplier = Boolean(supplierState.defaultSupplierUserId && candidateSet.has(supplierState.defaultSupplierUserId.trim()));
+
+  // If an account is configured as both roles, fail closed instead of guessing.
+  if (isDceOps === isSupplier) return null;
+  return isDceOps ? 'DCE' : 'CSDT';
 }
 
 export async function dispatchMessageToPartner(opts: {
@@ -156,20 +162,20 @@ export async function handlePartnerZaloMessage(input: {
   }
 
   if (resolved.status === 'AMBIGUOUS') {
-    const summaryLines = resolved.candidates.slice(0, 6).map((o, idx) => {
-      const shortCode = o.trackingCode.split('-').pop() || o.trackingCode;
-      const form = orderToFormData(o);
-      return `${idx + 1}) #${shortCode} (${o.trackingCode}): ${form.dia_chi_lay_hang} -> ${form.dia_chi_giao_hang} (${form.thong_tin_hang})`;
-    });
+    const exampleCode = resolved.candidates[0]?.trackingCode.split('-').pop();
     const clarifyPartnerMsg =
       `⚠️ Hiện có ${resolved.candidates.length} đơn đang chờ phản hồi. ` +
-      `Nhờ anh/chị Quote (trả lời) đúng tin nhắn đơn hoặc ghi kèm 4 số cuối (VD: "#${resolved.candidates[0].trackingCode.split('-').pop()} 1tr2") giúp em ạ:\n` +
-      summaryLines.join('\n');
+      `Nhờ anh/chị Quote đúng tin nhắn của đơn hoặc gửi mã đơn/4 số cuối (VD: "#${exampleCode || '2319'} 1tr2") để em xác định đơn cần xử lý ạ.`;
+    const partnerTargetUserId =
+      partnerRole === 'DCE' ? supplierState.dceOpsUserId : supplierState.defaultSupplierUserId;
 
-    if (!input.skipZaloSend) {
-      await sendZaloOAReplyWithMeta(input.primaryUserId, clarifyPartnerMsg);
+    // Never expose the pending-order list or send this prompt to an unverified inbound sender.
+    if (partnerTargetUserId && !input.skipZaloSend && shouldSendAmbiguousPrompt(partnerTargetUserId, resolved.candidates.map((order) => order.trackingCode))) {
+      await sendZaloOAReplyWithMeta(partnerTargetUserId, clarifyPartnerMsg);
     }
-    await recordCrmInteraction(input.primaryUserId, 'bot', clarifyPartnerMsg);
+    if (partnerTargetUserId) {
+      await recordCrmInteraction(partnerTargetUserId, 'bot', clarifyPartnerMsg);
+    }
     return { handled: true, status: 'AMBIGUOUS', partnerMessage: clarifyPartnerMsg };
   }
 

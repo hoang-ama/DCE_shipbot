@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS zalo_auth (
       ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS current_session_id VARCHAR(50);
       ALTER TABLE crm_customers ADD COLUMN IF NOT EXISTS session_started_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE crm_messages ADD COLUMN IF NOT EXISTS session_id VARCHAR(50);
+      ALTER TABLE crm_messages ADD COLUMN IF NOT EXISTS ai_trace JSONB;
       CREATE TABLE IF NOT EXISTS order_dispatch_threads (
         id VARCHAR(120) PRIMARY KEY,
         tracking_code VARCHAR(50) NOT NULL,

@@ -24,6 +24,7 @@ export interface CrmMessage {
   sender_name: string;
   message_text: string;
   shipping_info_snapshot?: any;
+  ai_trace?: any;
   created_at: string;
 }
 

@@ -98,6 +98,7 @@ export async function initDatabaseAndRestore() {
         sender_name: r.sender_name,
         message_text: r.message_text,
         shipping_info_snapshot: r.shipping_info_snapshot,
+        ai_trace: r.ai_trace || undefined,
         created_at: new Date(r.created_at).toISOString(),
       });
     }

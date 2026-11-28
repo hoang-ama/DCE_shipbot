@@ -8,6 +8,7 @@ import {
   MicOff,
   Volume2,
   Workflow,
+  FlaskConical,
   Copy,
   Check,
   X,
@@ -17,7 +18,7 @@ import { completedTraceTurns, formatTraceTurn, formatRecentTraceTurns, copyTrace
 
 const TRACE_SOURCES: Record<AITraceSource, { label: string; color: string }> = {
   rule: { label: 'Rule-based', color: 'bg-emerald-100 text-emerald-800' },
-  qwen: { label: 'Qwen', color: 'bg-violet-100 text-violet-800' },
+  qwen: { label: 'Qwen trích xuất', color: 'bg-violet-100 text-violet-800' },
   gemini: { label: 'Gemini', color: 'bg-blue-100 text-blue-800' },
   rule_fallback: { label: 'Rule-based fallback', color: 'bg-amber-100 text-amber-900' },
   unknown: { label: 'Chưa xác định', color: 'bg-slate-100 text-slate-600' },
@@ -28,7 +29,7 @@ const NODE_NAMES: Record<string, string> = {
   rule: 'Rule-based / Fast Path', qwen: 'Qwen local', validate: 'Extraction Validator',
   rule_extract: 'Rule-based NLP / DCE', qwen_extract: 'Qwen Extract', qwen_reply: 'Qwen Reply',
   merge: 'Hợp nhất dữ liệu', reply_validate: 'Reply Validator', gemini_extract_validate: 'Gemini Extraction Validator', gemini_validate: 'Gemini Reply Validator', final: 'Kết quả cuối cùng',
-  local_reply: 'Tạo phản hồi bằng Rule-based', legacy_pipeline: 'Pipeline Express gốc',
+  local_reply: 'Tạo phản hồi bằng Rule-based', rule_reply: 'Rule-based viết câu trả lời', rule_ops_fallback: 'Rule-based nhờ DCE Ops hỗ trợ', legacy_pipeline: 'Pipeline Express gốc',
   legacy_rule: 'Rule-based trong Express', legacy_extract: 'Regex / trích xuất sơ bộ',
   gemini: 'Gemini API', address_enrichment: 'Chuẩn hóa địa chỉ (DCE / Gemini)', legacy_reply: 'Tổng hợp dữ liệu và tạo phản hồi',
   legacy_fallback: 'Rule-based fallback', router: 'AI Router', web_request: 'Web request',
@@ -52,7 +53,7 @@ const REASONS: Record<string, string> = {
   RULE_REPLY: 'Backend tạo câu trả lời, không gọi thêm LLM',
   QWEN_TIMEOUT: 'Qwen quá thời gian chờ', QWEN_BUSY: 'Qwen đang xử lý request khác',
   QWEN_INPUT_TOO_LONG: 'Đầu vào vượt giới hạn ký tự', NO_QWEN_RESULT: 'Không có kết quả Qwen để kiểm tra',
-  GEMINI_JSON_RECEIVED: 'Gemini trả JSON; backend tiếp tục kiểm tra và tổng hợp',
+  GEMINI_JSON_RECEIVED: 'Gemini trả JSON; backend tiếp tục kiểm tra và tổng hợp', RULE_FOLLOWUP_SELECTED: 'Rule-based chọn tối đa hai trường còn thiếu để hỏi', RULE_RESPONSE_CREATED: 'Câu trả lời do Rule-based tạo', GEMINI_CREDITS_EXHAUSTED: 'Gemini báo hết credit; Rule-based hướng khách nhờ DCE Ops',
   GEMINI_NO_CLIENT: 'Gemini chưa được khởi tạo', GEMINI_TIMEOUT: 'Gemini quá thời gian chờ',
   GEMINI_REQUEST_ERROR: 'Lỗi gọi Gemini', GEMINI_EMPTY_RESPONSE: 'Gemini không trả nội dung',
   GEMINI_INVALID_JSON: 'Gemini trả JSON lỗi', LEGACY_CONFIRMATION: 'Xác nhận bằng quy tắc có sẵn',
@@ -69,6 +70,7 @@ interface ChatPanelProps {
   onSelectQuickReply: (text: string) => void;
   countdown?: number | null;
   onFlushNow?: () => void;
+  onOpenExperiment?: () => void;
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
@@ -79,9 +81,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onSelectQuickReply,
   countdown = null,
   onFlushNow,
+  onOpenExperiment,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isTraceOpen, setIsTraceOpen] = useState(false);
+  const [expandedTraceSteps, setExpandedTraceSteps] = useState<Set<string>>(() => new Set());
   const [copyFeedback, setCopyFeedback] = useState<{ key: string; status: 'ok' | 'error'; message: string } | null>(null);
   const copySequence = useRef(0);
   const traceDialogRef = useRef<HTMLDialogElement>(null);
@@ -239,6 +243,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         </div>
       </div>
 
+      {onOpenExperiment && <div className="relative z-10 border-b border-slate-200 bg-white px-4 py-2.5">
+        <button type="button" onClick={onOpenExperiment} disabled={isLoading}
+          className="flex w-full items-center justify-between gap-3 rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2.5 text-left transition-colors hover:bg-violet-100 disabled:cursor-wait disabled:opacity-60">
+          <span><span className="block text-[10px] font-semibold uppercase tracking-wide text-violet-700">Không gian riêng</span>
+            <span className="text-sm font-bold text-slate-800">Mở chatbot thử nghiệm</span></span>
+          <span className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 shadow-xs"><FlaskConical className="h-4 w-4" />Thử nghiệm</span>
+        </button>
+      </div>}
+
       {/* Messages Feed */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/60">
         {messages.map((message) => {
@@ -285,6 +298,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                   }`}
                 >
                   <span>{message.timestamp}</span>
+                  {isBot && message.aiTrace && <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${TRACE_SOURCES[message.aiTrace.source]?.color || 'bg-slate-100 text-slate-600'}`} title="Nguồn tạo câu trả lời">{TRACE_SOURCES[message.aiTrace.source]?.label || 'Nguồn chưa rõ'}</span>}
                   {isBot && (
                     <button
                       type="button"
@@ -387,7 +401,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         onCancel={() => setIsTraceOpen(false)}
         onClose={() => { ++copySequence.current; setCopyFeedback(null); setIsTraceOpen(false); traceButtonRef.current?.focus(); }}
         onClick={e => { if (e.target === e.currentTarget) setIsTraceOpen(false); }}
-        className="fixed inset-0 m-auto w-[min(760px,94vw)] max-h-[85vh] rounded-2xl border border-slate-200 bg-white text-slate-900 p-0 shadow-2xl backdrop:bg-slate-950/45 overflow-y-auto">
+        className="fixed inset-0 m-auto w-[min(1180px,97vw)] max-h-[92vh] rounded-2xl border border-slate-200 bg-white text-slate-900 p-0 shadow-2xl backdrop:bg-slate-950/45 overflow-y-auto">
         <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-5 py-4 flex items-start justify-between gap-3">
           <div>
             <h2 id="ai-trace-title" className="flex items-center gap-2 font-bold text-lg"><Workflow className="w-5 h-5 text-blue-600" /> Luồng xử lý AI</h2>
@@ -423,21 +437,36 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               {trace ? <div className="border-l-2 border-slate-200 ml-1 pl-3 space-y-2">
                 {trace.steps.map((step, j) => {
                   const status = STEP_STATUS[step.status] || STEP_STATUS.info;
-                  return <div key={j} className="relative rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                    <span className="absolute -left-[19px] top-3 h-2.5 w-2.5 bg-blue-400 ring-2 ring-white rounded-full" />
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="font-semibold">{j + 1}. {NODE_NAMES[step.node] || step.node}</span>
-                      <span className={`rounded px-1.5 py-0.5 ${status.color}`}>{status.label}</span>
-                      {step.elapsedMs !== undefined && <span className="ml-auto text-slate-500 tabular-nums">{formatDuration(step.elapsedMs)}</span>}
-                    </div>
-                    {step.reason && <div className="mt-1 text-[11px] text-slate-600 break-words">{REASONS[step.reason] && <span>{REASONS[step.reason]} · </span>}<code>{step.reason}</code></div>}
-                    {step.detail && <details className="mt-2 rounded border border-slate-200 bg-white">
-                      <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-blue-700">Xem input / output / lỗi</summary>
-                      <div className="space-y-2 px-3 pb-3">{Object.entries(step.detail).filter(([,value])=>value!==undefined).map(([key,value])=><div key={key}>
-                        <div className="text-[11px] font-semibold text-slate-600 mb-1">{key}</div>
-                        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-slate-100 p-2 text-xs font-mono">{typeof value==='string'?value:JSON.stringify(value,null,2)}</pre>
-                      </div>)}</div>
-                    </details>}
+                  const stepKey = `${user.id}:${j}`;
+                  const isExpanded = expandedTraceSteps.has(stepKey);
+                  const detailEntries = Object.entries(step.detail || {}).filter(([, value]) => value !== undefined);
+                  const toggleStep = () => setExpandedTraceSteps(previous => {
+                    const next = new Set(previous);
+                    if (next.has(stepKey)) next.delete(stepKey); else next.add(stepKey);
+                    return next;
+                  });
+                  const detailLabel = (key: string) => ({ input: 'INPUT · Dữ liệu đầu vào', output: 'OUTPUT · Kết quả đầu ra', error: 'ERROR · Lỗi', reply: 'OUTPUT · Nội dung phản hồi', request: 'INPUT · Request', response: 'OUTPUT · Response' }[key.toLowerCase()] || key);
+                  return <div key={j} className="relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <span className="absolute -left-[19px] top-4 h-2.5 w-2.5 bg-blue-400 ring-2 ring-white rounded-full" />
+                    <button type="button" aria-expanded={isExpanded} onClick={toggleStep}
+                      className="flex w-full flex-wrap items-center gap-2 bg-slate-50 px-4 py-3 text-left hover:bg-blue-50/70">
+                      <span className="font-semibold text-sm">{j + 1}. {NODE_NAMES[step.node] || step.node}</span>
+                      <span className={`rounded px-2 py-0.5 text-xs ${status.color}`}>{status.label}</span>
+                      {step.elapsedMs !== undefined && <span className="ml-auto text-xs text-slate-500 tabular-nums">{formatDuration(step.elapsedMs)}</span>}
+                      <span className="w-full text-xs text-blue-700">{isExpanded ? 'Nhấn để thu gọn' : `Nhấn để xem INPUT / OUTPUT / ERROR${detailEntries.length ? ` · ${detailEntries.length} mục` : ''}`}</span>
+                    </button>
+                    {step.reason && <div className="px-4 pb-3 text-xs text-slate-600">{REASONS[step.reason] && <span>{REASONS[step.reason]} · </span>}<code>{step.reason}</code></div>}
+                    {isExpanded && <div className="space-y-3 border-t border-slate-200 p-4">
+                      {detailEntries.length ? <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">{detailEntries.map(([key, value]) => <section key={key} className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                        <h4 className="border-b border-slate-200 bg-white px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">{detailLabel(key)}</h4>
+                        <pre className="max-h-[52vh] overflow-auto whitespace-pre-wrap break-words p-3 text-xs leading-relaxed font-mono">{typeof value === 'string' ? value : JSON.stringify(value, null, 2)}</pre>
+                      </section>)}</div> : <p className="text-sm text-slate-500">Node này không có payload chi tiết.</p>}
+                      <div className="flex justify-end"><button type="button"
+                        onClick={() => void handleCopy(`${stepKey}:copy`, JSON.stringify({ turn: i + 1, customerInput: user.text, botOutput: reply?.text || null, node: step.node, status: step.status, reason: step.reason || null, elapsedMs: step.elapsedMs ?? null, detail: step.detail || null }, null, 2), `Đã sao chép đầy đủ Node ${j + 1} của lượt ${i + 1}.`)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100">
+                        {copyFeedback?.key === `${stepKey}:copy` && copyFeedback.status === 'ok' ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}Copy toàn bộ node
+                      </button></div>
+                    </div>}
                   </div>;
                 })}
               </div> : <div className="text-xs text-slate-500 rounded-lg bg-slate-50 p-3">{reply ? 'Backend không trả trace cho lượt này.' : isLoading ? 'Đang xử lý, trace sẽ xuất hiện khi có phản hồi.' : 'Chưa nhận được trace.'}</div>}

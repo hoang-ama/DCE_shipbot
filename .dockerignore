@@ -2,6 +2,12 @@ node_modules
 dist
 build
 coverage
+**/.venv
+**/__pycache__
+**/*.pyc
+**/evaluation-results
+.pytest_cache
+.ruff_cache
 .env
 .env.*
 !.env.example

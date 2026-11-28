@@ -16,8 +16,10 @@ import {
   UserCheck,
   ArrowRight,
   ExternalLink,
+  Workflow,
 } from 'lucide-react';
 import { ShippingInfo } from '../../shared/types';
+import { CrmAiTraceDialog } from './CrmAiTraceDialog';
 
 export interface CrmCustomerItem {
   user_id: string;
@@ -43,6 +45,7 @@ export interface CrmMessageItem {
   sender_name: string;
   message_text: string;
   shipping_info_snapshot?: any;
+  ai_trace?: any;
   created_at: string;
 }
 
@@ -61,12 +64,14 @@ export const CrmModal: React.FC<CrmModalProps> = ({
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('all');
   const [messages, setMessages] = useState<CrmMessageItem[]>([]);
+  const [traceMessages, setTraceMessages] = useState<CrmMessageItem[]>([]);
   const [search, setSearch] = useState('');
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendNotice, setSendNotice] = useState<string | null>(null);
+  const [isTraceOpen, setIsTraceOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -98,6 +103,18 @@ export const CrmModal: React.FC<CrmModalProps> = ({
     } finally {
       setLoadingMessages(false);
     }
+  };
+
+  const openCustomerTrace = async () => {
+    if (!selectedUserId) return;
+    try {
+      const res = await fetch(`/api/crm/customers/${encodeURIComponent(selectedUserId)}/messages`);
+      const data = await res.json();
+      setTraceMessages(Array.isArray(data) ? data : messages);
+    } catch {
+      setTraceMessages(messages);
+    }
+    setIsTraceOpen(true);
   };
 
   useEffect(() => {
@@ -451,7 +468,7 @@ export const CrmModal: React.FC<CrmModalProps> = ({
                   ) {
                     uniqueSessions.unshift(selectedCustomer.current_session_id);
                   }
-                  if (uniqueSessions.length === 0) return null;
+                  if (uniqueSessions.length === 0 && !messages.some((item) => item.ai_trace)) return null;
                   return (
                     <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto text-[11px]">
                       <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
@@ -466,6 +483,14 @@ export const CrmModal: React.FC<CrmModalProps> = ({
                         }`}
                       >
                         Tất cả
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void openCustomerTrace()}
+                        className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white px-2 py-0.5 font-semibold text-blue-700 hover:bg-blue-50 shrink-0"
+                        title="Mở luồng AI đã lưu cho khách hàng này"
+                      >
+                        <Workflow className="h-3 w-3" /> Luồng AI ({messages.filter((item) => item.sender === 'bot' && item.ai_trace).length})
                       </button>
                       {uniqueSessions.map((sid) => (
                         <button
@@ -526,7 +551,7 @@ export const CrmModal: React.FC<CrmModalProps> = ({
                               </span>
                             ) : (
                               <span className="font-semibold text-blue-700 flex items-center gap-1">
-                                <Bot className="w-3 h-3" /> ShipBot AI
+                                <Bot className="w-3 h-3" /> ShipBot AI{m.ai_trace?.source === 'rule' ? ' · Rule-based' : m.ai_trace?.source === 'qwen' ? ' · Qwen trích xuất' : m.ai_trace?.source === 'gemini' ? ' · Gemini' : ''}
                               </span>
                             )}
                             <span>&bull;</span>
@@ -601,6 +626,7 @@ export const CrmModal: React.FC<CrmModalProps> = ({
           </div>
         </div>
       </div>
+      <CrmAiTraceDialog open={isTraceOpen} onClose={() => setIsTraceOpen(false)} customerName={selectedCustomer?.name || 'Khách hàng'} messages={traceMessages.length ? traceMessages : messages} />
     </div>
   );
 };

@@ -1,0 +1,14 @@
+{
+  "id": "RIDE-005",
+  "serviceType": "ride",
+  "firstName": "Tuấn",
+  "lastName": "Đỗ",
+  "displayName": "Đỗ Tuấn",
+  "vehicle": { "make": "Toyota", "model": "Innova", "year": 2020, "category": "MPV", "seatCapacity": 7 },
+  "maxPassengers": 6,
+  "serviceAreas": ["Đà Nẵng", "Hội An", "Huế"],
+  "capabilities": ["one_way", "round_trip", "tourist_pickup"],
+  "availability": "daily",
+  "contact": "MOCK-RIDE-005",
+  "notes": "Đối tác mẫu; hoạt động tại miền Trung."
+}

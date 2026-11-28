@@ -361,59 +361,35 @@ export const ZaloStatusModal: React.FC<ZaloStatusModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-slate-200 bg-white px-5 gap-1 text-xs font-semibold overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`py-2.5 px-3 border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === 'overview'
-                ? 'border-blue-600 text-blue-600 font-bold'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            Tổng quan & Trạng thái
-          </button>
-          <button
-            onClick={() => setActiveTab('database')}
-            className={`py-2.5 px-3 border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-              activeTab === 'database'
-                ? 'border-blue-600 text-blue-600 font-bold'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <Database className="w-3.5 h-3.5" />
-            Lưu Vĩnh Viễn (DB)
-          </button>
-          <button
-            onClick={() => setActiveTab('update')}
-            className={`py-2.5 px-3 border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === 'update'
-                ? 'border-blue-600 text-blue-600 font-bold'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            Dán Token
-          </button>
-          <button
-            onClick={() => setActiveTab('logs')}
-            className={`py-2.5 px-3 border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === 'logs'
-                ? 'border-blue-600 text-blue-600 font-bold'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            Nhật ký sự kiện ({data?.logs?.length || 0})
-          </button>
-          <button
-            onClick={() => setActiveTab('guide')}
-            className={`py-2.5 px-3 border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === 'guide'
-                ? 'border-blue-600 text-blue-600 font-bold'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            Giải pháp triệt để
-          </button>
-        </div>
+        <nav
+          aria-label="Các mục quản lý Zalo OA"
+          className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 border-b border-slate-200 bg-white p-2.5 text-xs font-semibold"
+        >
+          {([
+            { id: 'overview', label: 'Tổng quan & Trạng thái' },
+            { id: 'database', label: 'Lưu Vĩnh Viễn (DB)', icon: <Database className="w-3.5 h-3.5 shrink-0" /> },
+            { id: 'update', label: 'Dán Token' },
+            { id: 'logs', label: `Nhật ký sự kiện (${data?.logs?.length || 0})` },
+            { id: 'guide', label: 'Giải pháp triệt để' },
+          ] as const).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              aria-current={activeTab === tab.id ? 'page' : undefined}
+              className={`min-w-0 min-h-10 rounded-lg border px-2 py-2 text-center leading-tight transition-colors ${
+                activeTab === tab.id
+                  ? 'border-blue-200 bg-blue-50 text-blue-700 font-bold'
+                  : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-800'
+              }`}
+            >
+              <span className="flex items-center justify-center gap-1.5 break-words">
+                {'icon' in tab && tab.icon}
+                <span>{tab.label}</span>
+              </span>
+            </button>
+          ))}
+        </nav>
 
         {/* Modal Body */}
         <div className="p-5 overflow-y-auto space-y-4 flex-1">

@@ -13,7 +13,8 @@ export async function recordCrmInteraction(
   messageText: string,
   shippingInfo?: any,
   senderName?: string,
-  sessionId?: string
+  sessionId?: string,
+  aiTrace?: any
 ) {
   const now = new Date().toISOString();
   const sess = zaloUserSessions.get(userId);
@@ -113,6 +114,7 @@ export async function recordCrmInteraction(
     sender_name: resolvedSenderName,
     message_text: messageText,
     shipping_info_snapshot: shippingInfo || null,
+    ai_trace: aiTrace || null,
     created_at: now,
   };
   inMemoryMessages.push(msgEntry);
@@ -153,8 +155,8 @@ export async function recordCrmInteraction(
       ]);
 
       await databaseState.dbPool.query(`
-        INSERT INTO crm_messages (user_id, session_id, sender, sender_name, message_text, shipping_info_snapshot, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7);
+        INSERT INTO crm_messages (user_id, session_id, sender, sender_name, message_text, shipping_info_snapshot, ai_trace, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
       `, [
         userId,
         activeSessionId,
@@ -162,6 +164,7 @@ export async function recordCrmInteraction(
         resolvedSenderName,
         messageText,
         shippingInfo ? JSON.stringify(shippingInfo) : null,
+        aiTrace ? JSON.stringify(aiTrace) : null,
         now,
       ]);
     } catch (dbErr: any) {

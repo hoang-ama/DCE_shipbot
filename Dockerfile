@@ -16,13 +16,16 @@ ENV NODE_ENV=production
 ENV PORT=2700
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+# server.ts is launched through tsx, which is currently declared in devDependencies.
+# Keep the locked dependency set in the runtime image so the production entrypoint works.
+RUN npm ci
 
 COPY --from=builder /app/dist ./dist
 COPY server.ts ./
 COPY tsconfig.json ./
 COPY dify_dichung_bot.yml ./
 COPY src ./src
+COPY chatbot ./chatbot
 
 # Ensure runtime user can write fallback cache files (.zalo_token.json, .zalo_sessions.json)
 RUN chown -R node:node /app

@@ -1,0 +1,14 @@
+{
+  "id": "RIDE-001",
+  "serviceType": "ride",
+  "firstName": "Minh",
+  "lastName": "Nguyễn",
+  "displayName": "Nguyễn Minh",
+  "vehicle": { "make": "Toyota", "model": "Vios", "year": 2022, "category": "Sedan", "seatCapacity": 4 },
+  "maxPassengers": 4,
+  "serviceAreas": ["Hà Nội", "Nội Bài", "Bắc Ninh"],
+  "capabilities": ["one_way", "airport_transfer", "scheduled_pickup"],
+  "availability": "daily",
+  "contact": "MOCK-RIDE-001",
+  "notes": "Đối tác mẫu; ưu tiên chuyến nội thành và sân bay."
+}

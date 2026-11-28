@@ -29,6 +29,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      qwen:
+        condition: service_healthy
     ports:
       - "${PORT:-2700}:2700"
     environment:
@@ -41,6 +43,28 @@ services:
       ZALO_APP_SECRET: ${ZALO_APP_SECRET:-}
       ZALO_OA_ACCESS_TOKEN: ${ZALO_OA_ACCESS_TOKEN:-}
       ZALO_REFRESH_TOKEN: ${ZALO_REFRESH_TOKEN:-}
+      QWEN_LOCAL_URL: http://qwen:8765
+
+  qwen:
+    build:
+      context: ./chatbot/passenger-transport/llm
+      dockerfile: Dockerfile
+    container_name: dce-shipbot-qwen
+    restart: unless-stopped
+    environment:
+      QWEN_MODEL_ID: ${QWEN_MODEL_ID:-Qwen/Qwen3-0.6B}
+      QWEN_HOST: 0.0.0.0
+      QWEN_PORT: 8765
+      HF_HOME: /data/huggingface
+    volumes:
+      - qwen_cache:/data/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
 
 volumes:
   pg_data:
+  qwen_cache:

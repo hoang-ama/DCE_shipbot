@@ -1,0 +1,15 @@
+{
+  "id": "RENTAL-003",
+  "serviceType": "rental",
+  "firstName": "Bình",
+  "lastName": "Hoàng",
+  "displayName": "Hoàng Bình",
+  "vehicle": { "make": "Hyundai", "model": "Solati", "year": 2023, "category": "Minibus", "seatCapacity": 16 },
+  "maxPassengers": 14,
+  "driverOptions": ["with_driver"],
+  "serviceAreas": ["Hà Nội", "Hải Phòng", "Quảng Ninh", "Lào Cai"],
+  "capabilities": ["group_rental", "multi_stop", "day_trip", "overnight", "luggage"],
+  "availability": "advance_booking",
+  "contact": "MOCK-RENTAL-003",
+  "notes": "Đối tác mẫu; phù hợp đoàn đông, tour doanh nghiệp và đi tỉnh."
+}

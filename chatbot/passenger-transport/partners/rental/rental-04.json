@@ -1,0 +1,15 @@
+{
+  "id": "RENTAL-004",
+  "serviceType": "rental",
+  "firstName": "Ngọc",
+  "lastName": "Bùi",
+  "displayName": "Bùi Ngọc",
+  "vehicle": { "make": "VinFast", "model": "VF 9", "year": 2024, "category": "Electric SUV", "seatCapacity": 7 },
+  "maxPassengers": 6,
+  "driverOptions": ["with_driver"],
+  "serviceAreas": ["Đà Nẵng", "Hội An", "Huế", "Quảng Nam"],
+  "capabilities": ["multi_stop", "day_trip", "tourist_pickup", "scheduled_rental"],
+  "availability": "daily",
+  "contact": "MOCK-RENTAL-004",
+  "notes": "Đối tác mẫu; xe điện có tài xế, nhận lịch trình miền Trung."
+}

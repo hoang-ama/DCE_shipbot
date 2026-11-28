@@ -69,9 +69,10 @@ export function createDispatchRouter() {
       }
 
       const partnerUserId =
-        role === 'DCE'
-          ? supplierState.dceOpsUserId || 'ops-manual'
-          : supplierState.defaultSupplierUserId || 'csdt-manual';
+        role === 'DCE' ? supplierState.dceOpsUserId : supplierState.defaultSupplierUserId;
+      if (!partnerUserId) {
+        return res.status(409).json({ error: 'Chưa liên kết tài khoản Zalo của đối tác; đã bỏ qua gửi tin.' });
+      }
 
       const result = await handlePartnerZaloMessage({
         userIds: [partnerUserId],
