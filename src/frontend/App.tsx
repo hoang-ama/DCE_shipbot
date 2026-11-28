@@ -35,7 +35,7 @@ import {
 } from './utils/logistics';
 
 const STORAGE_ORDERS_KEY = 'dev_bot_saved_orders_v1';
-const CHAT_JOB_TIMEOUT_MS = 60_000;
+const CHAT_JOB_TIMEOUT_MS = 180_000;
 
 async function requestChatJob(payload: Record<string, unknown>, requestId: string) {
   const started = Date.now();
@@ -58,7 +58,7 @@ async function requestChatJob(payload: Record<string, unknown>, requestId: strin
     }
   }
   if (!initial?.jobId) {
-    const error = new Error('Không nhận được mã tác vụ chat trong giới hạn 1 phút.');
+    const error = new Error('Không nhận được mã tác vụ chat trong giới hạn 3 phút.');
     Object.assign(error, { code: 'CHAT_JOB_TIMEOUT' });
     throw error;
   }
@@ -73,7 +73,7 @@ async function requestChatJob(payload: Record<string, unknown>, requestId: strin
       }
       if (!response.ok || body.status === 'error') {
         const error = new Error(body.error === 'CHAT_JOB_TIMEOUT'
-          ? 'Qwen chưa hoàn tất trong 1 phút. Lượt này chưa có câu trả lời; hãy thử lại.'
+          ? 'Qwen chưa hoàn tất trong 3 phút. Lượt này chưa có câu trả lời; hãy thử lại.'
           : `Chat thất bại: ${body.error || `HTTP ${response.status}`}`);
         Object.assign(error, { aiTrace: body.aiTrace, code: body.error });
         throw error;
@@ -85,7 +85,7 @@ async function requestChatJob(payload: Record<string, unknown>, requestId: strin
     }
     await new Promise(resolve => window.setTimeout(resolve, 500));
   }
-  const error = new Error('Đã hết 1 phút chờ kết quả. Tác vụ chưa có phản hồi; hãy kiểm tra trạng thái trước khi gửi lại.');
+  const error = new Error('Đã hết 3 phút chờ kết quả. Tác vụ chưa có phản hồi; hãy kiểm tra trạng thái trước khi gửi lại.');
   Object.assign(error, { code: 'CHAT_JOB_TIMEOUT' });
   throw error;
 }
@@ -289,7 +289,7 @@ export default function App() {
         },
         sender: 'bot',
         text: (error as any)?.code === 'CHAT_JOB_TIMEOUT'
-          ? 'Qwen chưa trả kết quả trong 1 phút. Lượt này chưa có câu trả lời; hãy kiểm tra trạng thái tác vụ trước khi gửi lại.'
+          ? 'Qwen chưa trả kết quả trong 3 phút. Lượt này chưa có câu trả lời; hãy kiểm tra trạng thái tác vụ trước khi gửi lại.'
           : SUPPORT_MESSAGE,
         timestamp: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
         quickReplies: [],
@@ -377,7 +377,7 @@ export default function App() {
     const initial = await response.json();
     if (initial.status !== 'running' || typeof initial.jobId !== 'string') return initial;
 
-    const deadline = Date.now() + 60_000;
+    const deadline = Date.now() + 180_000;
     while (Date.now() < deadline) {
       await new Promise(resolve => window.setTimeout(resolve, 1000));
       const result = await fetch(`/api/passenger-transport/agent-turn/${encodeURIComponent(initial.jobId)}`);
@@ -386,7 +386,7 @@ export default function App() {
       if (!result.ok) throw new Error(data.error || `HTTP error! status: ${result.status}`);
       return data;
     }
-    throw new Error('Tác vụ chuyển người đã quá giới hạn 1 phút. Hãy kiểm tra luồng AI trước khi gửi lại để tránh chạy trùng lượt.');
+    throw new Error('Tác vụ chuyển người đã quá giới hạn 3 phút. Hãy kiểm tra luồng AI trước khi gửi lại để tránh chạy trùng lượt.');
   };
 
   const postCargoAgentTurn = async (payload: Record<string, unknown>) => {
@@ -396,7 +396,7 @@ export default function App() {
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const initial = await response.json();
     if (initial.status !== 'running' || typeof initial.jobId !== 'string') return initial;
-    const deadline = Date.now() + 60_000;
+    const deadline = Date.now() + 180_000;
     while (Date.now() < deadline) {
       await new Promise(resolve => window.setTimeout(resolve, 1000));
       const result = await fetch(`/api/cargo-transport/agent-turn/${encodeURIComponent(initial.jobId)}`);
@@ -405,7 +405,7 @@ export default function App() {
       if (!result.ok) throw new Error(data.error || `HTTP error! status: ${result.status}`);
       return data;
     }
-    throw new Error('Tác vụ chuyển hàng đã quá giới hạn 1 phút. Hãy kiểm tra luồng AI trước khi gửi lại để tránh chạy trùng lượt.');
+    throw new Error('Tác vụ chuyển hàng đã quá giới hạn 3 phút. Hãy kiểm tra luồng AI trước khi gửi lại để tránh chạy trùng lượt.');
   };
 
   const handleSendExperimentMessage = async (userText: string) => {

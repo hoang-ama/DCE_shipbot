@@ -133,7 +133,7 @@ function ruleConfirmation(message: string): ConfirmationDecision {
   if (/^(?:(?:da|vang|uh|um)\s+)?(?:dung(?: roi)?|chinh xac|chuan(?: roi)?|xac nhan|em xac nhan|anh xac nhan|chi xac nhan|dong y|ok|oke|okay|yes|confirm)(?:\s+(?:nhe|a|em|roi))?$/u.test(text)) return 'confirm';
   return 'unclear';
 }
-async function qwenConfirmation(message: string, history: any[], setup: BookingSetup, fields: Record<string, string>, timeoutMs = 60_000) {
+async function qwenConfirmation(message: string, history: any[], setup: BookingSetup, fields: Record<string, string>, timeoutMs = 180_000) {
   const system = `Khách vừa xem bản tóm tắt thông tin ${SERVICE_LABELS[setup.service]}. Chỉ phân loại tin nhắn mới nhất là khách xác nhận bản tóm tắt (confirm), từ chối/chưa đúng (reject), hay chưa rõ (unclear). Nếu khách hỏi thêm hoặc nói nội dung không thể hiện rõ đồng ý/từ chối thì chọn unclear. Không trích xuất trường, không trả lời khách. Chỉ trả JSON {"decision":"confirm|reject|unclear"}.`;
   const result = await callPassengerQwen(system, {
     latestMessage: message,
@@ -181,7 +181,7 @@ async function geminiFinalReview(setup: BookingSetup, message: string, history: 
   return call(system, { latestMessage: message, recentHistory: recentHistory(history, message).slice(-7), completeFields: fields }, schema);
 }
 
-export async function bookingStep(setup: BookingSetup, message: string, history: any[], current: any, call: ModelCall, trace: (step: AITraceStep) => void, qwenTimeoutMs = 60_000) {
+export async function bookingStep(setup: BookingSetup, message: string, history: any[], current: any, call: ModelCall, trace: (step: AITraceStep) => void, qwenTimeoutMs = 180_000) {
   const info = baseInfo(current);
   const previousFields = { ...(info.serviceDraft?.fields || {}) } as Record<string, string>;
   const fields: Record<string, string> = {};

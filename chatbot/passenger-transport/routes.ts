@@ -9,7 +9,7 @@ type AgentJob =
   | { status: 'error'; createdAt: number; error: string };
 const agentJobs = new Map<string, AgentJob>();
 const JOB_TTL_MS = 30 * 60 * 1000;
-const JOB_TIMEOUT_MS = 60 * 1000;
+const JOB_TIMEOUT_MS = 180 * 1000;
 
 function pruneJobs() {
   const cutoff = Date.now() - JOB_TTL_MS;
@@ -27,7 +27,7 @@ passengerTransportRouter.post('/api/passenger-transport/agent-turn', async (req,
   const timeout = setTimeout(() => {
     const job = agentJobs.get(jobId);
     if (job?.status === 'running') {
-      agentJobs.set(jobId, { status: 'error', createdAt: Date.now(), error: 'CHAT_JOB_TIMEOUT: Qwen/Gemini processing exceeded 1 minute' });
+      agentJobs.set(jobId, { status: 'error', createdAt: Date.now(), error: 'CHAT_JOB_TIMEOUT: Qwen/Gemini processing exceeded 3 minutes' });
       console.error(`[Passenger Agent] turn timed out after ${JOB_TIMEOUT_MS}ms`, { event, experimentId, jobId });
     }
   }, JOB_TIMEOUT_MS);

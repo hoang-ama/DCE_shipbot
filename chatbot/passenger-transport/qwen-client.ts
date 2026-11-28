@@ -1,6 +1,6 @@
 const QWEN_URL = process.env.QWEN_LOCAL_URL || 'http://127.0.0.1:8765';
 
-export async function callPassengerQwen(system: string, input: unknown, maxNewTokens = 700, timeoutMs = 60_000) {
+export async function callPassengerQwen(system: string, input: unknown, maxNewTokens = 700, timeoutMs = 180_000) {
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);

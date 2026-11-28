@@ -59,7 +59,7 @@ export function applyExpressChanges(current:any,message:string,value:any){
  }
  return {info,accepted,rejected,changedSides};
 }
-export async function expressStep(message:string,history:any[],current:any,call:ModelCall,trace:(s:AITraceStep)=>void,qwenTimeoutMs=60_000){
+export async function expressStep(message:string,history:any[],current:any,call:ModelCall,trace:(s:AITraceStep)=>void,qwenTimeoutMs=180_000){
  const before=baseInfo(current);const original=structuredClone(before);
  if(before.isConfirmed){trace({node:'rule',status:'ok',reason:'CONFIRMED_ORDER_SUPPORT'});return {reply:SUPPORT_MESSAGE,shippingInfo:original,quickReplies:[],source:'rule' as const};}
  const enrich=async(info:any)=>{for(const side of ['sender','receiver'] as const){const raw=info[side].rawAddress||info[side].address;const old=original[side].rawAddress||original[side].address;if(raw&&norm(raw)!==norm(old)){if(/^https?:/iu.test(raw)&&info[side].hasWardCommune&&info[side].resolvedAddress){trace({node:'address_enrichment',status:'ok',reason:'DCE_MAP_RESOLVED',detail:{input:raw,output:info[side].address}});}else Object.assign(info[side],await normalizeAddress(raw,call,trace,side));}}return info;};

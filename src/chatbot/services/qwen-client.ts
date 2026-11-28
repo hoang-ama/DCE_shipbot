@@ -31,7 +31,7 @@ export async function extractWithQwen(input: {
     currentInfo: input.currentInfo || {},
     recentHistory,
     latestMessage: input.message,
-  }, 128, input.timeoutMs ?? 60_000);
+  }, 128, input.timeoutMs ?? 180_000);
   const value = parsePassengerQwenJson(generated.text);
   if (!value || typeof value !== 'object' || !value.fields || typeof value.fields !== 'object' || Array.isArray(value.fields)) {
     throw new Error('QWEN_EXTRACTION_SCHEMA');

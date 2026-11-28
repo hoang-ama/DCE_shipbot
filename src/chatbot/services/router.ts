@@ -15,7 +15,7 @@ const fold=(s:string)=>s.toLocaleLowerCase('vi').normalize('NFD').replace(/[\u03
 const norm=(s:string)=>fold(s);
 const chooseGroup=(m:string):MainVertical|undefined=>{const t=norm(m);if(/^(?:1|chuyen nguoi|cho nguoi|dat xe|thue xe|di xe)$/u.test(t)||/\b(?:chuyen nguoi|cho nguoi|dat xe theo chuyen|thue xe theo lich trinh)\b/u.test(t))return 'chuyen_nguoi';if(/^(?:2|chuyen hang|gui hang|van chuyen hang|cho hang)$/u.test(t)||/\b(?:chuyen hang|gui hang|van chuyen hang|cho hang)\b/u.test(t))return 'chuyen_hang';if(/^(?:3|du lich|tour|khach san)$/u.test(t)||/\b(?:du lich|tour|khach san)\b/u.test(t))return 'du_lich';return undefined;};
 const chooseSub=(m:string,g:MainVertical):SubVertical|undefined=>{const t=norm(m);const n=Number(t);if(Number.isInteger(n)&&n>=1&&n<=SUBS[g].length)return SUBS[g][n-1];if(g==='chuyen_nguoi'){if(/\b(?:ride|dat xe theo chuyen|xe theo chuyen|theo chuyen|mot chuyen|1 chuyen)\b/u.test(t))return 'ride';if(/\b(?:rental|thue xe|thue theo lich trinh|lich trinh|thue xe theo ngay)\b/u.test(t))return 'rent';}if(g==='chuyen_hang'){if(/\b(?:express|chuyen phat nhanh|gui hang nhanh|giao hang nhanh)\b/u.test(t))return 'express';if(/\b(?:truck|thue xe tai|xe tai|chuyen do|chuyen nha)\b/u.test(t))return 'truck';}if(g==='du_lich'&&/\b(?:tour|khach san|dat tour|dat khach san)\b/u.test(t))return 'tour';};
-async function classifySelectionWithQwen(message:string,group?:MainVertical,history:any[]=[],timeoutMs=60_000):Promise<{group?:MainVertical;service?:SubVertical;model?:string;elapsedMs?:number}> {
+async function classifySelectionWithQwen(message:string,group?:MainVertical,history:any[]=[],timeoutMs=180_000):Promise<{group?:MainVertical;service?:SubVertical;model?:string;elapsedMs?:number}> {
  const system='Phân loại một câu trả lời cho menu dịch vụ Đi Chung. Nếu đang hỏi nhóm: mainVertical là chuyen_nguoi, chuyen_hang, du_lich. Nếu đã có nhóm, chỉ chọn subVertical thuộc nhóm: chuyen_nguoi => ride/rent; chuyen_hang => express/truck; du_lich => tour. Nếu câu không chọn rõ, trả unknown. Chỉ trả JSON {"mainVertical":"...","subVertical":"..."}; không trả lời người dùng.';
  const result=await callPassengerQwen(system,{message,selectedGroup:group||'unknown',recentHistory:history.slice(-2).map(x=>({role:x.role||x.sender,content:x.content||x.text||''}))},100,timeoutMs);
  const value=parsePassengerQwenJson(result.text);
@@ -56,7 +56,7 @@ export async function routeConversation(message:string,history:any[]=[],current:
   if ((!group && !selectedGroup) || (group && !selectedSub)) {
     if (message.trim().length >= 4 && !isMenuGreeting) {
       try {
-        const classified=await classifySelectionWithQwen(message,group,history,Math.max(1,(options.qwenDeadlineAt||Date.now()+60_000)-Date.now()));
+        const classified=await classifySelectionWithQwen(message,group,history,Math.max(1,(options.qwenDeadlineAt||Date.now()+180_000)-Date.now()));
         if(!group&&classified.group)selectedGroup=classified.group;
         if(group&&classified.service)selectedSub=classified.service;
         else if(!group&&classified.service){selectedSub=classified.service;selectedGroup=classified.group||(['ride','rent'].includes(classified.service)?'chuyen_nguoi':['express','truck'].includes(classified.service)?'chuyen_hang':'du_lich');}
@@ -83,7 +83,7 @@ export async function routeConversation(message:string,history:any[]=[],current:
   return {...paused,suppressed:true};
  }
  let result;
- const qwenTimeoutMs=Math.max(1,(options.qwenDeadlineAt||Date.now()+60_000)-Date.now());
+ const qwenTimeoutMs=Math.max(1,(options.qwenDeadlineAt||Date.now()+180_000)-Date.now());
  if(service==='express')result=await expressStep(message,history,current,call,trace,qwenTimeoutMs);
  else if(service==='ride')result=await rideStep(message,history,current,call,trace,qwenTimeoutMs);
  else if(service==='rent')result=await rentStep(message,history,current,call,trace,qwenTimeoutMs);

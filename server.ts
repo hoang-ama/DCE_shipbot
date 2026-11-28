@@ -57,7 +57,7 @@ import { randomUUID } from 'node:crypto';
 
 // Web chat
 const chatRouter = Router();
-const CHAT_JOB_TIMEOUT_MS = 60_000;
+const CHAT_JOB_TIMEOUT_MS = 180_000;
 const CHAT_JOB_TTL_MS = 10 * 60_000;
 type ChatJob = {
   id: string;
@@ -73,7 +73,7 @@ const chatRequestJobs = new Map<string, string>();
 
 /**
  * Zalo acknowledges webhooks immediately, then keeps processing on the server.
- * If Qwen is temporarily unavailable, retry the pipeline for one total minute
+ * If Qwen is temporarily unavailable, retry the pipeline for up to three minutes
  * before sending the final fallback to the customer.
  */
 async function processZaloChatWithQwenWait(
@@ -128,7 +128,7 @@ async function processZaloChatWithQwenWait(
       steps: [
         ...retrySteps,
         ...(lastResult.aiTrace?.steps || []),
-        { node: 'zalo_qwen_wait', status: 'error', reason: 'ONE_MINUTE_DEADLINE', detail: { requestId, attempt, timeoutMs: CHAT_JOB_TIMEOUT_MS } },
+        { node: 'zalo_qwen_wait', status: 'error', reason: 'THREE_MINUTE_DEADLINE', detail: { requestId, attempt, timeoutMs: CHAT_JOB_TIMEOUT_MS } },
       ],
     };
     console.error(`[Zalo AI] request_id=${requestId} Qwen wait timed out`, { attempt, elapsed_ms: elapsedMs });
@@ -150,7 +150,7 @@ function startChatJob(job: ChatJob, rawMessage: string, history: any[], currentI
     if (job.status !== 'running') return;
     job.status = 'error';
     job.error = 'CHAT_JOB_TIMEOUT';
-    job.aiTrace = { source: 'error', reason: 'CHAT_JOB_TIMEOUT', elapsedMs: Date.now() - started, steps: [{ node: 'chat_job', status: 'error', reason: 'ONE_MINUTE_DEADLINE', detail: { requestId: job.requestId, timeoutMs: CHAT_JOB_TIMEOUT_MS } }] };
+    job.aiTrace = { source: 'error', reason: 'CHAT_JOB_TIMEOUT', elapsedMs: Date.now() - started, steps: [{ node: 'chat_job', status: 'error', reason: 'THREE_MINUTE_DEADLINE', detail: { requestId: job.requestId, timeoutMs: CHAT_JOB_TIMEOUT_MS } }] };
     console.error(`[CHAT JOB] id=${job.id} timed out elapsed_ms=${Date.now() - started}`);
   }, CHAT_JOB_TIMEOUT_MS);
   timer.unref?.();
