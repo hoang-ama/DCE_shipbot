@@ -82,6 +82,27 @@ jobs:
             else
               COMPOSE="docker-compose"
             fi
+            # Qwen is built on the VPS from the checked-out source; its model cache
+            # stays in the qwen_cache volume and is not part of the image build.
+            $COMPOSE build qwen
+            $COMPOSE up -d qwen
+            QWEN_STATUS=""
+            for attempt in $(seq 1 60); do
+              QWEN_STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' dce-shipbot-qwen 2>/dev/null || true)
+              if [ "$QWEN_STATUS" = "healthy" ]; then
+                break
+              fi
+              if [ "$QWEN_STATUS" = "unhealthy" ]; then
+                $COMPOSE logs --tail=100 qwen
+                exit 1
+              fi
+              sleep 5
+            done
+            if [ "$QWEN_STATUS" != "healthy" ]; then
+              echo "Qwen did not become healthy within 5 minutes (status: ${QWEN_STATUS:-missing})"
+              $COMPOSE logs --tail=100 qwen
+              exit 1
+            fi
             $COMPOSE pull app
             $COMPOSE up -d --no-deps app
             docker image prune -f
