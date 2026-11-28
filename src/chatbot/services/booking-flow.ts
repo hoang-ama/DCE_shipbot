@@ -251,7 +251,9 @@ export async function bookingStep(setup: BookingSetup, message: string, history:
         currentInfo: fields,
       });
       patch = { ...extracted.fields, ...rulePatch };
-      clearFields = extracted.clearFields;
+      clearFields = extracted.clearFields.filter(
+        (key): key is string => typeof key === 'string'
+      );
       source = 'qwen';
       trace({ node: `${setup.service}_qwen_extract`, status: 'ok', reason: 'QWEN_PATCH_RECEIVED', elapsedMs: extracted.elapsedMs, detail: extracted.detail });
       const suspiciousLoss = setup.fields.filter((field) => Boolean(fields[field.key]) && (
