@@ -22,16 +22,16 @@ export async function extractWithQwen(input: {
     'fields là bản vá thưa: chỉ ghi những giá trị có bằng chứng trong tin nhắn mới nhất; không ghi null cho trường không được nhắc đến. Nếu khách nói rõ muốn xóa/bỏ một thông tin đã lưu, đưa key vào clearFields, không tự xóa chỉ vì khách không nhắc lại.',
     'Không trả lời khách, không hỏi thêm, không phân loại dịch vụ, không suy diễn, không báo giá. Dữ liệu hiện có và lịch sử chỉ dùng để hiểu nội dung chỉnh sửa.',
   ].join('\n');
-  const recentHistory = (input.history || []).slice(-7).map((item) => ({
+  const recentHistory = (input.history || []).slice(-5).map((item) => ({
     role: item.role || item.sender || 'user',
-    content: String(item.content || item.text || '').slice(0, 1200),
+    content: String(item.content || item.text || '').slice(0, 800),
   }));
   const generated = await callPassengerQwen(system, {
     service: input.service,
     currentInfo: input.currentInfo || {},
     recentHistory,
     latestMessage: input.message,
-  }, 220, input.timeoutMs ?? 60_000);
+  }, 128, input.timeoutMs ?? 60_000);
   const value = parsePassengerQwenJson(generated.text);
   if (!value || typeof value !== 'object' || !value.fields || typeof value.fields !== 'object' || Array.isArray(value.fields)) {
     throw new Error('QWEN_EXTRACTION_SCHEMA');

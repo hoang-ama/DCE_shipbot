@@ -1,6 +1,8 @@
 from __future__ import annotations
 import json
 import os
+import select
+import socket
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock, Thread
@@ -32,8 +34,20 @@ def load_model():
     )
     _model.eval()
 
-def generate(system: str, user_input: object, max_new_tokens: int) -> tuple[str, int]:
-    with _generation_lock:
+def generate(system: str, user_input: object, max_new_tokens: int, should_stop=None) -> tuple[str, int]:
+    if should_stop is None:
+        _generation_lock.acquire()
+    else:
+        while not _generation_lock.acquire(timeout=0.25):
+            if should_stop():
+                print("[Qwen worker] Client disconnected while waiting for the generation lock.")
+                return "", 0
+        if should_stop():
+            _generation_lock.release()
+            print("[Qwen worker] Client disconnected before inference started.")
+            return "", 0
+
+    try:
         load_model()
         text = json.dumps(user_input, ensure_ascii=False)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": text}]
@@ -44,12 +58,35 @@ def generate(system: str, user_input: object, max_new_tokens: int) -> tuple[str,
         encoded = _tokenizer(prompt, return_tensors="pt", truncation=True, max_length=MAX_INPUT_TOKENS)
         input_device = _model.get_input_embeddings().weight.device
         encoded = {key: value.to(input_device) for key, value in encoded.items()}
+        stopping_criteria = None
+        if should_stop is not None:
+            from transformers import StoppingCriteria, StoppingCriteriaList
+
+            class StopOnDisconnect(StoppingCriteria):
+                reported = False
+
+                def __call__(self, input_ids, scores, **kwargs):
+                    disconnected = should_stop()
+                    if disconnected and not self.reported:
+                        print("[Qwen worker] Client disconnected during generation; stopping inference.")
+                        self.reported = True
+                    return disconnected
+
+            stopping_criteria = StoppingCriteriaList([StopOnDisconnect()])
         with _torch.inference_mode():
             started = time.perf_counter()
-            output = _model.generate(**encoded, max_new_tokens=max(32, min(max_new_tokens, 1200)), do_sample=False, use_cache=True)
+            output = _model.generate(
+                **encoded,
+                max_new_tokens=max(32, min(max_new_tokens, 1200)),
+                do_sample=False,
+                use_cache=True,
+                stopping_criteria=stopping_criteria,
+            )
             elapsed_ms = int((time.perf_counter() - started) * 1000)
         answer = _tokenizer.decode(output[0][encoded["input_ids"].shape[-1]:], skip_special_tokens=True).strip()
-    return answer, elapsed_ms
+        return answer, elapsed_ms
+    finally:
+        _generation_lock.release()
 
 def warmup_model():
     global _warmup_status, _warmup_error
@@ -71,6 +108,17 @@ def warmup_model():
         print(f"[Qwen worker] Startup warm-up failed: {_warmup_error}")
 
 class Handler(BaseHTTPRequestHandler):
+    def _client_disconnected(self) -> bool:
+        try:
+            readable, _, _ = select.select([self.connection], [], [], 0)
+            if not readable:
+                return False
+            return self.connection.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT) == b""
+        except (BlockingIOError, InterruptedError):
+            return False
+        except OSError:
+            return True
+
     def _send(self, status: int, payload: dict):
         body = json.dumps(payload, ensure_ascii=False).encode()
         try:
@@ -100,7 +148,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, {"error": "not_found"})
         try:
             payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
-            answer, elapsed_ms = generate(str(payload.get("system", "")), payload.get("input", {}), int(payload.get("max_new_tokens", 512)))
+            answer, elapsed_ms = generate(
+                str(payload.get("system", "")),
+                payload.get("input", {}),
+                int(payload.get("max_new_tokens", 512)),
+                should_stop=self._client_disconnected,
+            )
+            print(f"[Qwen worker] Inference finished in {elapsed_ms} ms.")
         except Exception as exc:
             print(f"[Qwen worker] Generation failed: {type(exc).__name__}: {exc}")
             return self._send(500, {"error": f"{type(exc).__name__}: {exc}"})

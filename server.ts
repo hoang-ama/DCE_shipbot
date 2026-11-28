@@ -159,7 +159,11 @@ function startChatJob(job: ChatJob, rawMessage: string, history: any[], currentI
     let attempt = 0;
     while (job.status === 'running') {
       attempt += 1;
-      const result = await processChatPipeline(rawMessage, history, currentInfo, { debug });
+      const result = await processChatPipeline(rawMessage, history, currentInfo, {
+        debug,
+        qwenDeadlineAt: started + CHAT_JOB_TIMEOUT_MS,
+      });
+      if (job.status !== 'running') return;
       const qwenFailed = result.aiTrace?.steps?.some((step: any) => /qwen/iu.test(String(step.node || '')) && step.status === 'error');
       if (qwenFailed) {
         console.warn(`[CHAT JOB] id=${job.id} Qwen attempt failed; keeping result private and retrying`, { attempt, elapsed_ms: Date.now() - started });
@@ -167,7 +171,6 @@ function startChatJob(job: ChatJob, rawMessage: string, history: any[], currentI
         await new Promise(resolve => setTimeout(resolve, 250));
         continue;
       }
-      if (job.status !== 'running') return;
       const pricing = result.shippingInfo.subVertical === 'express'
         ? calculateDCExpressPriceFromShippingInfo(result.shippingInfo, pricingState.activeStandardRoutes)
         : null;
