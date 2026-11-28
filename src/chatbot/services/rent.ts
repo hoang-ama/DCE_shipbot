@@ -15,4 +15,4 @@ export const rentSetup: BookingSetup = {
   instructions: 'Thuê xe theo lịch trình/ngày, mặc định có tài xế. Cần tên, số điện thoại, điểm đón, điểm đến, lịch trình, thời gian bắt đầu/kết thúc và số hành khách. Không hỏi loại xe/hạng xe.',
   completion: 'Dạ em đã ghi nhận đủ lịch trình thuê xe có tài xế. Hệ thống chưa kết nối API báo giá/đặt xe, nên nhân viên cần kiểm tra giá và xác nhận lại với anh/chị ạ.',
 };
-export const rentStep = (...args: [string, any[], any, import('./gemini-client').ModelCall, (step: import('../../shared/types').AITraceStep) => void]) => bookingStep(rentSetup, ...args);
+export const rentStep = (...args: [string, any[], any, import('./gemini-client').ModelCall, (step: import('../../shared/types').AITraceStep) => void, number?]) => bookingStep(rentSetup, ...args);

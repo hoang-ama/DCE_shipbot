@@ -12,4 +12,4 @@ export const rideSetup: BookingSetup = {
   instructions: 'Đặt xe theo chuyến, mặc định một chiều và chỉ đón tại một điểm. Cần tên, số điện thoại, điểm đón, điểm đến, ngày giờ khởi hành và số hành khách. Không hỏi loại xe/hạng xe.',
   completion: 'Dạ em đã ghi nhận đủ thông tin chuyến đi. Hệ thống chưa kết nối API báo giá/đặt xe, nên nhân viên cần kiểm tra giá và xác nhận lại với anh/chị ạ.',
 };
-export const rideStep = (...args: [string, any[], any, import('./gemini-client').ModelCall, (step: import('../../shared/types').AITraceStep) => void]) => bookingStep(rideSetup, ...args);
+export const rideStep = (...args: [string, any[], any, import('./gemini-client').ModelCall, (step: import('../../shared/types').AITraceStep) => void, number?]) => bookingStep(rideSetup, ...args);

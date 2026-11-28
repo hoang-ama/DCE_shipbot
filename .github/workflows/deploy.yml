@@ -67,6 +67,7 @@ jobs:
       - name: Deploy to VPS via SSH
         uses: appleboy/ssh-action@v1.2.3
         with:
+          command_timeout: 35m
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           port: ${{ secrets.VPS_PORT }}
@@ -87,7 +88,7 @@ jobs:
             $COMPOSE build qwen
             $COMPOSE up -d qwen
             QWEN_STATUS=""
-            for attempt in $(seq 1 60); do
+            for attempt in $(seq 1 300); do
               QWEN_STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' dce-shipbot-qwen 2>/dev/null || true)
               if [ "$QWEN_STATUS" = "healthy" ]; then
                 break
@@ -99,7 +100,7 @@ jobs:
               sleep 5
             done
             if [ "$QWEN_STATUS" != "healthy" ]; then
-              echo "Qwen did not become healthy within 5 minutes (status: ${QWEN_STATUS:-missing})"
+              echo "Qwen did not become healthy within 25 minutes (status: ${QWEN_STATUS:-missing})"
               $COMPOSE logs --tail=100 qwen
               exit 1
             fi

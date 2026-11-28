@@ -14,4 +14,4 @@ export const truckSetup: BookingSetup = {
   instructions: 'Tiếp nhận yêu cầu thuê xe tải/chuyển đồ. Cần tên và số điện thoại liên hệ, địa chỉ lấy/giao, danh sách hàng và số lượng, ngày/khung giờ, loại xe tải. Cân nặng/kích thước là tùy chọn nếu khách biết. Không tự báo giá.',
   completion: 'Dạ em đã ghi nhận đủ thông tin chuyển đồ. Hệ thống chưa kết nối API báo giá/đặt xe tải, nên nhân viên cần kiểm tra và báo lại mức giá chính thức ạ.',
 };
-export const truckStep = (...args: [string, any[], any, import('./gemini-client').ModelCall, (step: import('../../shared/types').AITraceStep) => void]) => bookingStep(truckSetup, ...args);
+export const truckStep = (...args: [string, any[], any, import('./gemini-client').ModelCall, (step: import('../../shared/types').AITraceStep) => void, number?]) => bookingStep(truckSetup, ...args);

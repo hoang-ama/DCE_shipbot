@@ -133,13 +133,13 @@ function ruleConfirmation(message: string): ConfirmationDecision {
   if (/^(?:(?:da|vang|uh|um)\s+)?(?:dung(?: roi)?|chinh xac|chuan(?: roi)?|xac nhan|em xac nhan|anh xac nhan|chi xac nhan|dong y|ok|oke|okay|yes|confirm)(?:\s+(?:nhe|a|em|roi))?$/u.test(text)) return 'confirm';
   return 'unclear';
 }
-async function qwenConfirmation(message: string, history: any[], setup: BookingSetup, fields: Record<string, string>) {
+async function qwenConfirmation(message: string, history: any[], setup: BookingSetup, fields: Record<string, string>, timeoutMs = 60_000) {
   const system = `Khách vừa xem bản tóm tắt thông tin ${SERVICE_LABELS[setup.service]}. Chỉ phân loại tin nhắn mới nhất là khách xác nhận bản tóm tắt (confirm), từ chối/chưa đúng (reject), hay chưa rõ (unclear). Nếu khách hỏi thêm hoặc nói nội dung không thể hiện rõ đồng ý/từ chối thì chọn unclear. Không trích xuất trường, không trả lời khách. Chỉ trả JSON {"decision":"confirm|reject|unclear"}.`;
   const result = await callPassengerQwen(system, {
     latestMessage: message,
     recentHistory: history.slice(-4).map((item) => ({ role: item.role || item.sender, content: item.content || item.text || '' })),
     confirmedFields: fields,
-  }, 80, 60_000);
+  }, 80, timeoutMs);
   const parsed = parsePassengerQwenJson(result.text);
   const decision = parsed?.decision;
   if (!['confirm', 'reject', 'unclear'].includes(decision)) throw new Error('QWEN_CONFIRMATION_SCHEMA');
@@ -181,7 +181,7 @@ async function geminiFinalReview(setup: BookingSetup, message: string, history: 
   return call(system, { latestMessage: message, recentHistory: recentHistory(history, message).slice(-7), completeFields: fields }, schema);
 }
 
-export async function bookingStep(setup: BookingSetup, message: string, history: any[], current: any, call: ModelCall, trace: (step: AITraceStep) => void) {
+export async function bookingStep(setup: BookingSetup, message: string, history: any[], current: any, call: ModelCall, trace: (step: AITraceStep) => void, qwenTimeoutMs = 60_000) {
   const info = baseInfo(current);
   const previousFields = { ...(info.serviceDraft?.fields || {}) } as Record<string, string>;
   const fields: Record<string, string> = {};
@@ -207,7 +207,7 @@ export async function bookingStep(setup: BookingSetup, message: string, history:
     trace({ node: `${setup.service}_confirmation_rule`, status: decision === 'unclear' ? 'skip' : 'ok', reason: decision === 'confirm' ? 'CONFIRMATION_RECOGNIZED' : decision === 'reject' ? 'CONFIRMATION_REJECTED' : 'RULE_UNCLEAR' });
     if (decision === 'unclear') {
       try {
-        const result = await qwenConfirmation(message, history, setup, fields);
+        const result = await qwenConfirmation(message, history, setup, fields, qwenTimeoutMs);
         decision = result.decision;
         trace({ node: `${setup.service}_confirmation_qwen`, status: 'ok', reason: 'CONFIRMATION_CLASSIFIED', elapsedMs: result.elapsedMs, detail: { decision, model: result.model, rawOutput: result.rawOutput } });
       } catch (error) {
@@ -249,6 +249,7 @@ export async function bookingStep(setup: BookingSetup, message: string, history:
         fields: setup.fields,
         history: recentHistory(history, message).slice(-7),
         currentInfo: fields,
+        timeoutMs: qwenTimeoutMs,
       });
       patch = { ...extracted.fields, ...rulePatch };
       clearFields = extracted.clearFields.filter(

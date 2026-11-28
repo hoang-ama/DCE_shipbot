@@ -15,9 +15,9 @@ const fold=(s:string)=>s.toLocaleLowerCase('vi').normalize('NFD').replace(/[\u03
 const norm=(s:string)=>fold(s);
 const chooseGroup=(m:string):MainVertical|undefined=>{const t=norm(m);if(/^(?:1|chuyen nguoi|cho nguoi|dat xe|thue xe|di xe)$/u.test(t)||/\b(?:chuyen nguoi|cho nguoi|dat xe theo chuyen|thue xe theo lich trinh)\b/u.test(t))return 'chuyen_nguoi';if(/^(?:2|chuyen hang|gui hang|van chuyen hang|cho hang)$/u.test(t)||/\b(?:chuyen hang|gui hang|van chuyen hang|cho hang)\b/u.test(t))return 'chuyen_hang';if(/^(?:3|du lich|tour|khach san)$/u.test(t)||/\b(?:du lich|tour|khach san)\b/u.test(t))return 'du_lich';return undefined;};
 const chooseSub=(m:string,g:MainVertical):SubVertical|undefined=>{const t=norm(m);const n=Number(t);if(Number.isInteger(n)&&n>=1&&n<=SUBS[g].length)return SUBS[g][n-1];if(g==='chuyen_nguoi'){if(/\b(?:ride|dat xe theo chuyen|xe theo chuyen|theo chuyen|mot chuyen|1 chuyen)\b/u.test(t))return 'ride';if(/\b(?:rental|thue xe|thue theo lich trinh|lich trinh|thue xe theo ngay)\b/u.test(t))return 'rent';}if(g==='chuyen_hang'){if(/\b(?:express|chuyen phat nhanh|gui hang nhanh|giao hang nhanh)\b/u.test(t))return 'express';if(/\b(?:truck|thue xe tai|xe tai|chuyen do|chuyen nha)\b/u.test(t))return 'truck';}if(g==='du_lich'&&/\b(?:tour|khach san|dat tour|dat khach san)\b/u.test(t))return 'tour';};
-async function classifySelectionWithQwen(message:string,group?:MainVertical,history:any[]=[]):Promise<{group?:MainVertical;service?:SubVertical;model?:string;elapsedMs?:number}> {
+async function classifySelectionWithQwen(message:string,group?:MainVertical,history:any[]=[],timeoutMs=60_000):Promise<{group?:MainVertical;service?:SubVertical;model?:string;elapsedMs?:number}> {
  const system='Phân loại một câu trả lời cho menu dịch vụ Đi Chung. Nếu đang hỏi nhóm: mainVertical là chuyen_nguoi, chuyen_hang, du_lich. Nếu đã có nhóm, chỉ chọn subVertical thuộc nhóm: chuyen_nguoi => ride/rent; chuyen_hang => express/truck; du_lich => tour. Nếu câu không chọn rõ, trả unknown. Chỉ trả JSON {"mainVertical":"...","subVertical":"..."}; không trả lời người dùng.';
- const result=await callPassengerQwen(system,{message,selectedGroup:group||'unknown',recentHistory:history.slice(-2).map(x=>({role:x.role||x.sender,content:x.content||x.text||''}))},100,60_000);
+ const result=await callPassengerQwen(system,{message,selectedGroup:group||'unknown',recentHistory:history.slice(-2).map(x=>({role:x.role||x.sender,content:x.content||x.text||''}))},100,timeoutMs);
  const value=parsePassengerQwenJson(result.text);
  const validGroups:MainVertical[]=['chuyen_nguoi','chuyen_hang','du_lich'];
  const validServices:SubVertical[]=['ride','rent','express','truck','tour'];
@@ -28,7 +28,7 @@ async function classifySelectionWithQwen(message:string,group?:MainVertical,hist
 }
 const initialQuestion:Record<SubVertical,string>={ride:'Anh/chị muốn đón xe ở đâu ạ?',rent:'Anh/chị muốn đón xe tại đâu ạ?',express:'Anh/chị cho em xin địa chỉ hoặc điểm lấy hàng cụ thể nhé.',truck:'Anh/chị muốn lấy hàng tại địa chỉ nào ạ?',tour:'Anh/chị đang quan tâm tour hoặc khách sạn ở đâu ạ?'};
 const legacyShipment=(i:any)=>Boolean(i.sender?.address||i.receiver?.address||i.cargo?.name||i.deliveryTime||i.isConfirmed||i.trackingCode);
-export async function routeConversation(message:string,history:any[]=[],current:any={},options:{debug?:boolean;call?:ModelCall;channel?:'web'|'zalo'}={}): Promise<any> {
+export async function routeConversation(message:string,history:any[]=[],current:any={},options:{debug?:boolean;call?:ModelCall;channel?:'web'|'zalo';qwenDeadlineAt?:number}={}): Promise<any> {
  const start=Date.now(),steps:AITraceStep[]=[];const call=options.call||callGemini;history=Array.isArray(history)?history:[];let resetIndex=-1;for(let i=history.length-1;i>=0;i--){const h=history[i];if(h&&(h.role||h.sender)==='user'&&/^(?:đổi dịch vụ|chọn lại dịch vụ|menu|tạo đơn mới|đơn mới|reset)$/iu.test(String(h.content||h.text||'').trim())){resetIndex=i;break;}}if(resetIndex>=0)history=history.slice(resetIndex+1);current=baseInfo(current);message=String(message||'').trim();
  const trace=(s:AITraceStep)=>steps.push({...s,detail:options.debug&&s.detail?safeDetail(s.detail):undefined});
  function done(reply:string,shippingInfo:any,quickReplies:string[]=[],source:AITraceSource='rule',reason='SERVICE_ROUTER'){
@@ -43,17 +43,20 @@ export async function routeConversation(message:string,history:any[]=[],current:
  }
  let group=groups.includes(current.mainVertical)?current.mainVertical as MainVertical:undefined;
  let service=group&&SUBS[group].includes(current.subVertical)?current.subVertical as SubVertical:undefined;
- // Existing shipping sessions resume safely; new empty sessions must choose their group first.
- if(!group&&!service&&legacyShipment(current)){group='chuyen_hang';service='express';}
+ const isMenuGreeting=/^(?:chao(?: ban| em| anh| chi)?|xin chao|hi|hello|alo)$/u.test(norm(message));
+ const isExplicitMenuChoice=Boolean(chooseGroup(message)||groups.some((candidate)=>chooseSub(message,candidate)));
+ const hasPreviousBotReply=history.some((item)=>['model','assistant','bot'].includes(item?.role||item?.sender));
+ // Resume a legacy Express draft only when the conversation already contains a bot turn.
+ // A greeting, a menu answer, or a saved legacy payload by itself must not select Express.
+ if(!group&&!service&&legacyShipment(current)&&hasPreviousBotReply&&!isMenuGreeting&&!isExplicitMenuChoice){group='chuyen_hang';service='express';}
  if(!service){
   let selectedGroup: MainVertical | undefined = group ? undefined : chooseGroup(message);
   let selectedSub=group?chooseSub(message,group):undefined;
   let source:AITraceSource='rule';
-  const isMenuGreeting=/^(?:chao(?: ban| em| anh| chi)?|xin chao|hi|hello|alo)$/u.test(norm(message));
   if ((!group && !selectedGroup) || (group && !selectedSub)) {
     if (message.trim().length >= 4 && !isMenuGreeting) {
       try {
-        const classified=await classifySelectionWithQwen(message,group,history);
+        const classified=await classifySelectionWithQwen(message,group,history,Math.max(1,(options.qwenDeadlineAt||Date.now()+60_000)-Date.now()));
         if(!group&&classified.group)selectedGroup=classified.group;
         if(group&&classified.service)selectedSub=classified.service;
         else if(!group&&classified.service){selectedSub=classified.service;selectedGroup=classified.group||(['ride','rent'].includes(classified.service)?'chuyen_nguoi':['express','truck'].includes(classified.service)?'chuyen_hang':'du_lich');}
@@ -80,11 +83,12 @@ export async function routeConversation(message:string,history:any[]=[],current:
   return {...paused,suppressed:true};
  }
  let result;
- if(service==='express')result=await expressStep(message,history,current,call,trace);
- else if(service==='ride')result=await rideStep(message,history,current,call,trace);
- else if(service==='rent')result=await rentStep(message,history,current,call,trace);
- else if(service==='truck')result=await truckStep(message,history,current,call,trace);
- else result=await tourStep(message,history,current,call,trace);
+ const qwenTimeoutMs=Math.max(1,(options.qwenDeadlineAt||Date.now()+60_000)-Date.now());
+ if(service==='express')result=await expressStep(message,history,current,call,trace,qwenTimeoutMs);
+ else if(service==='ride')result=await rideStep(message,history,current,call,trace,qwenTimeoutMs);
+ else if(service==='rent')result=await rentStep(message,history,current,call,trace,qwenTimeoutMs);
+ else if(service==='truck')result=await truckStep(message,history,current,call,trace,qwenTimeoutMs);
+ else result=await tourStep(message,history,current,call,trace,qwenTimeoutMs);
  const source=steps.some(t=>t.node==='address_enrichment'&&t.reason==='DCE_GEMINI_INFERRED')?'gemini':result.source;
  return done(result.reply,{...result.shippingInfo,mainVertical:group,subVertical:service},result.quickReplies,source,'SERVICE_RESPONSE');
 }

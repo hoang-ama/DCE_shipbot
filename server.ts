@@ -71,6 +71,73 @@ type ChatJob = {
 const chatJobs = new Map<string, ChatJob>();
 const chatRequestJobs = new Map<string, string>();
 
+/**
+ * Zalo acknowledges webhooks immediately, then keeps processing on the server.
+ * If Qwen is temporarily unavailable, retry the pipeline for one total minute
+ * before sending the final fallback to the customer.
+ */
+async function processZaloChatWithQwenWait(
+  requestId: string,
+  rawMessage: string,
+  history: any[],
+  currentInfo: any,
+  debug: boolean,
+) {
+  const started = Date.now();
+  const deadlineAt = started + CHAT_JOB_TIMEOUT_MS;
+  const retrySteps: any[] = [];
+  let attempt = 0;
+  let lastResult: any;
+
+  while (Date.now() < deadlineAt) {
+    attempt += 1;
+    lastResult = await processChatPipeline(rawMessage, history, currentInfo, { debug, channel: 'zalo', qwenDeadlineAt: deadlineAt });
+    const qwenError = lastResult.aiTrace?.steps?.some(
+      (step: any) => /qwen/iu.test(String(step.node || '')) && step.status === 'error',
+    );
+
+    if (!qwenError) {
+      if (attempt > 1 && lastResult.aiTrace) {
+        lastResult.aiTrace.steps = [...retrySteps, ...lastResult.aiTrace.steps];
+        lastResult.aiTrace.elapsedMs = Date.now() - started;
+      }
+      console.info(`[Zalo AI] request_id=${requestId} completed attempts=${attempt} elapsed_ms=${Date.now() - started}`);
+      return lastResult;
+    }
+
+    retrySteps.push({
+      node: 'zalo_qwen_wait',
+      status: 'info',
+      reason: 'QWEN_ATTEMPT_FAILED_RETRYING',
+      detail: { attempt, elapsedMs: Date.now() - started },
+    });
+    const remaining = deadlineAt - Date.now();
+    console.warn(`[Zalo AI] request_id=${requestId} Qwen attempt failed; retrying`, { attempt, remaining_ms: remaining });
+    if (remaining <= 250) break;
+    const retryDelay = Math.min(5000, 500 * (2 ** Math.min(attempt - 1, 4)), remaining);
+    await new Promise((resolve) => setTimeout(resolve, retryDelay));
+  }
+
+  if (lastResult) {
+    const elapsedMs = Date.now() - started;
+    lastResult.aiTrace = {
+      ...(lastResult.aiTrace || {}),
+      source: 'error',
+      reason: 'QWEN_WAIT_TIMEOUT',
+      elapsedMs,
+      steps: [
+        ...retrySteps,
+        ...(lastResult.aiTrace?.steps || []),
+        { node: 'zalo_qwen_wait', status: 'error', reason: 'ONE_MINUTE_DEADLINE', detail: { requestId, attempt, timeoutMs: CHAT_JOB_TIMEOUT_MS } },
+      ],
+    };
+    console.error(`[Zalo AI] request_id=${requestId} Qwen wait timed out`, { attempt, elapsed_ms: elapsedMs });
+    return lastResult;
+  }
+
+  throw new Error(`ZALO_CHAT_PIPELINE_FAILED:${requestId}`);
+}
+
 function pruneChatJobs() {
   const cutoff = Date.now() - CHAT_JOB_TTL_MS;
   for (const [id, job] of chatJobs) if (job.createdAt < cutoff) chatJobs.delete(id);
@@ -379,10 +446,13 @@ messageRouter.post('/api/zalo/webhook', async (req: Request, res: Response) => {
       }
 
       // 6. Tiếp nhận thông tin đơn mới trên Zalo OA; chọn nhóm và nhánh dịch vụ trước khi thu thập hồ sơ
-      const result = await processChatPipeline(userText, session.history, session.currentInfo, {
-        channel: 'zalo',
-        debug: true, // CRM's internal AI trace viewer needs sanitized node payloads.
-      });
+      const result = await processZaloChatWithQwenWait(
+        String(message?.msg_id || randomUUID()),
+        userText,
+        session.history,
+        session.currentInfo,
+        true, // CRM's internal AI trace viewer needs sanitized node payloads.
+      );
 
       if (result.suppressed) {
         session.history.push({ role: 'user', content: userText });

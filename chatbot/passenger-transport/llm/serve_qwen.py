@@ -3,7 +3,7 @@ import json
 import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Lock
+from threading import Lock, Thread
 
 MODEL_ID = os.environ.get("QWEN_MODEL_ID", "Qwen/Qwen3-0.6B")
 HOST = os.environ.get("QWEN_HOST", "127.0.0.1")
@@ -13,6 +13,8 @@ _generation_lock = Lock()
 _tokenizer = None
 _model = None
 _torch = None
+_warmup_status = "pending"
+_warmup_error = None
 
 def load_model():
     global _tokenizer, _model, _torch
@@ -31,22 +33,42 @@ def load_model():
     _model.eval()
 
 def generate(system: str, user_input: object, max_new_tokens: int) -> tuple[str, int]:
-    load_model()
-    text = json.dumps(user_input, ensure_ascii=False)
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": text}]
-    try:
-        prompt = _tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
-    except TypeError:
-        prompt = _tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    encoded = _tokenizer(prompt, return_tensors="pt", truncation=True, max_length=MAX_INPUT_TOKENS)
-    input_device = _model.get_input_embeddings().weight.device
-    encoded = {key: value.to(input_device) for key, value in encoded.items()}
-    with _generation_lock, _torch.inference_mode():
-        started = time.perf_counter()
-        output = _model.generate(**encoded, max_new_tokens=max(32, min(max_new_tokens, 1200)), do_sample=False, use_cache=True)
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
-    answer = _tokenizer.decode(output[0][encoded["input_ids"].shape[-1]:], skip_special_tokens=True).strip()
+    with _generation_lock:
+        load_model()
+        text = json.dumps(user_input, ensure_ascii=False)
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": text}]
+        try:
+            prompt = _tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+        except TypeError:
+            prompt = _tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        encoded = _tokenizer(prompt, return_tensors="pt", truncation=True, max_length=MAX_INPUT_TOKENS)
+        input_device = _model.get_input_embeddings().weight.device
+        encoded = {key: value.to(input_device) for key, value in encoded.items()}
+        with _torch.inference_mode():
+            started = time.perf_counter()
+            output = _model.generate(**encoded, max_new_tokens=max(32, min(max_new_tokens, 1200)), do_sample=False, use_cache=True)
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+        answer = _tokenizer.decode(output[0][encoded["input_ids"].shape[-1]:], skip_special_tokens=True).strip()
     return answer, elapsed_ms
+
+def warmup_model():
+    global _warmup_status, _warmup_error
+    _warmup_status = "warming"
+    print(f"[Qwen worker] Startup warm-up started for {MODEL_ID}.")
+    try:
+        answer, elapsed_ms = generate(
+            "You are an internal startup check. Reply with exactly: OK",
+            {"message": "Start-up check. Reply with OK."},
+            32,
+        )
+        if not answer:
+            raise RuntimeError("QWEN_WARMUP_EMPTY_RESPONSE")
+        _warmup_status = "ready"
+        print(f"[Qwen worker] Startup warm-up completed in {elapsed_ms} ms.")
+    except Exception as exc:
+        _warmup_error = f"{type(exc).__name__}: {exc}"
+        _warmup_status = "error"
+        print(f"[Qwen worker] Startup warm-up failed: {_warmup_error}")
 
 class Handler(BaseHTTPRequestHandler):
     def _send(self, status: int, payload: dict):
@@ -64,7 +86,14 @@ class Handler(BaseHTTPRequestHandler):
         return True
     def do_GET(self):
         if self.path == "/health":
-            return self._send(200, {"ok": True, "model": MODEL_ID, "loaded": _model is not None})
+            return self._send(200, {
+                "ok": True,
+                "ready": _warmup_status == "ready",
+                "warmup_status": _warmup_status,
+                "warmup_error": _warmup_error,
+                "model": MODEL_ID,
+                "loaded": _model is not None,
+            })
         return self._send(404, {"error": "not_found"})
     def do_POST(self):
         if self.path != "/generate":
@@ -80,5 +109,7 @@ class Handler(BaseHTTPRequestHandler):
         print("[Qwen worker] " + fmt % args)
 
 if __name__ == "__main__":
-    print(f"Loading {MODEL_ID} on first request; listening at http://{HOST}:{PORT}")
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    print(f"Starting {MODEL_ID} worker with startup warm-up; listening at http://{HOST}:{PORT}")
+    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    Thread(target=warmup_model, name="qwen-startup-warmup", daemon=True).start()
+    server.serve_forever()

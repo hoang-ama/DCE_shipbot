@@ -13,6 +13,7 @@ export async function extractWithQwen(input: {
   fields: Array<{ key: string; label: string; optional?: boolean }>;
   history?: Array<{ role?: string; content?: string; sender?: string; text?: string }>;
   currentInfo?: Record<string, string>;
+  timeoutMs?: number;
 }) {
   const system = [
     `Bạn là bộ trích xuất thông tin cho dịch vụ ${input.service}. ${input.instructions}`,
@@ -30,7 +31,7 @@ export async function extractWithQwen(input: {
     currentInfo: input.currentInfo || {},
     recentHistory,
     latestMessage: input.message,
-  }, 220, 60_000);
+  }, 220, input.timeoutMs ?? 60_000);
   const value = parsePassengerQwenJson(generated.text);
   if (!value || typeof value !== 'object' || !value.fields || typeof value.fields !== 'object' || Array.isArray(value.fields)) {
     throw new Error('QWEN_EXTRACTION_SCHEMA');
