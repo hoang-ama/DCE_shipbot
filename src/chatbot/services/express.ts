@@ -21,7 +21,7 @@ const massEvidence=(m:string,v:string)=>includesSpan(m,v)||includesSpan(m.replac
 export function applyExpressChanges(current:any,message:string,value:any){
  const info=baseInfo(current),accepted:Record<string,unknown>={},rejected:Record<string,string>={};
  if(!value||!['collect','question','cancel_pending','confirm','support','clarify'].includes(value.intent)||!['SET','ADD','UPDATE','REPLACE','REMOVE'].includes(value.operation)||!value.fields||typeof value.fields!=='object'||Array.isArray(value.fields)||typeof value.reply!=='string')throw new Error('GEMINI_SCHEMA');
- if(current?.isConfirmed)return {info,accepted,rejected:{order:'CONFIRMED_ORDER_REQUIRES_STAFF'}};
+ if(current?.isConfirmed)return {info,accepted,rejected:{order:'CONFIRMED_ORDER_REQUIRES_STAFF'},changedSides:[] as string[]};
  if(value.intent==='cancel_pending')delete info.pendingOperation;
  const f=value.fields,op=value.operation;const changedSides:string[]=[];
  for(const k of fieldKeys){const v=f[k];if(v===undefined||v==='')continue;if(!validText(v)){rejected[k]='INVALID_VALUE';continue;}if(!includesSpan(message,v)&&!(k==='weight'&&massEvidence(message,v))){rejected[k]='UNGROUNDED_VALUE';continue;}
